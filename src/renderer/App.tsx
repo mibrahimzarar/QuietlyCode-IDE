@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useCallback } from 'react'
 import { useApp } from './store/appStore'
 import SetupScreen from './components/SetupScreen'
 import TitleBar from './components/TitleBar'
@@ -77,6 +77,31 @@ export default function App() {
         }
     }, [])
 
+    const saveActiveFile = useCallback(async () => {
+        const file = state.openFiles.find(f => f.path === state.activeFilePath)
+        if (!file || !file.isDirty) return
+        const result = await window.electronAPI.writeFile(file.path, file.content)
+        if (result.success) {
+            dispatch({ type: 'MARK_FILE_SAVED', path: file.path })
+            // Refresh tree to update Git status
+            if (state.projectPath) {
+                const tree = await window.electronAPI.getFileTree(state.projectPath)
+                dispatch({ type: 'SET_FILE_TREE', tree })
+            }
+        }
+    }, [state.openFiles, state.activeFilePath, state.projectPath, dispatch])
+
+    // Close context menu on click
+    useEffect(() => {
+        function handleClick() {
+            if (state.contextMenu) {
+                dispatch({ type: 'SET_CONTEXT_MENU', menu: null })
+            }
+        }
+        window.addEventListener('click', handleClick)
+        return () => window.removeEventListener('click', handleClick)
+    }, [state.contextMenu])
+
     // Global keyboard shortcuts
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
@@ -120,32 +145,8 @@ export default function App() {
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [state.showCommandPalette, state.showSettings, state.diffPreview, state.contextMenu])
+    }, [state.showCommandPalette, state.showSettings, state.diffPreview, state.contextMenu, saveActiveFile, dispatch, state.showCommandPalette])
 
-    // Close context menu on click
-    useEffect(() => {
-        function handleClick() {
-            if (state.contextMenu) {
-                dispatch({ type: 'SET_CONTEXT_MENU', menu: null })
-            }
-        }
-        window.addEventListener('click', handleClick)
-        return () => window.removeEventListener('click', handleClick)
-    }, [state.contextMenu])
-
-    async function saveActiveFile() {
-        const file = state.openFiles.find(f => f.path === state.activeFilePath)
-        if (!file || !file.isDirty) return
-        const result = await window.electronAPI.writeFile(file.path, file.content)
-        if (result.success) {
-            dispatch({ type: 'MARK_FILE_SAVED', path: file.path })
-            // Refresh tree to update Git status
-            if (state.projectPath) {
-                const tree = await window.electronAPI.getFileTree(state.projectPath)
-                dispatch({ type: 'SET_FILE_TREE', tree })
-            }
-        }
-    }
 
     return (
         <div className="app-container">

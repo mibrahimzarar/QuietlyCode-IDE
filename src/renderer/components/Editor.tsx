@@ -106,6 +106,26 @@ export default function Editor() {
             }
         })
 
+        editor.addAction({
+            id: 'save',
+            label: 'Save File',
+            keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+            run: async () => {
+                const model = editor.getModel()
+                if (model && activeFile) {
+                    const content = model.getValue()
+                    const result = await window.electronAPI.writeFile(activeFile.path, content)
+                    if (result.success) {
+                        dispatch({ type: 'MARK_FILE_SAVED', path: activeFile.path })
+                        if (state.projectPath) {
+                            const tree = await window.electronAPI.getFileTree(state.projectPath)
+                            dispatch({ type: 'SET_FILE_TREE', tree })
+                        }
+                    }
+                }
+            }
+        })
+
         // Define themes
         monaco.editor.defineTheme('bitnet-dark', {
             base: 'vs-dark',

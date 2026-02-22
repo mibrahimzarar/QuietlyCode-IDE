@@ -3,6 +3,7 @@ const electron = require("electron");
 const path = require("path");
 const fs = require("fs");
 const child_process = require("child_process");
+const util = require("util");
 const http = require("http");
 const https = require("https");
 const axios = require("axios");
@@ -32,8 +33,41 @@ const IGNORED_FILES = /* @__PURE__ */ new Set([
   "Thumbs.db",
   "desktop.ini"
 ]);
+const execAsync = util.promisify(child_process.exec);
 class FileService {
+  constructor() {
+    this.gitStatusMap = /* @__PURE__ */ new Map();
+  }
+  async getGitStatus(projectPath) {
+    try {
+      const { stdout } = await execAsync("git status --porcelain=v1 --ignored", { cwd: projectPath });
+      const map = /* @__PURE__ */ new Map();
+      stdout.split("\n").forEach((line) => {
+        if (!line || line.length < 3) return;
+        const x = line[0];
+        const y = line[1];
+        const filePath = path.join(projectPath, line.substring(3).trim().replace(/"/g, ""));
+        if (x === "?") {
+          map.set(filePath, "untracked");
+        } else if (x === "!") {
+          map.set(filePath, "ignored");
+        } else if (x !== " ") {
+          map.set(filePath, "staged");
+        } else if (y === "M") {
+          map.set(filePath, "modified");
+        } else if (y === "D") {
+          map.set(filePath, "deleted");
+        }
+      });
+      this.gitStatusMap = map;
+    } catch (err) {
+      this.gitStatusMap = /* @__PURE__ */ new Map();
+    }
+  }
   async getFileTree(dirPath, depth = 0, maxDepth = 6) {
+    if (depth === 0) {
+      await this.getGitStatus(dirPath);
+    }
     if (depth >= maxDepth) return [];
     try {
       const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -50,7 +84,8 @@ class FileService {
         const node = {
           name: entry.name,
           path: fullPath,
-          isDirectory: entry.isDirectory()
+          isDirectory: entry.isDirectory(),
+          gitStatus: this.gitStatusMap.get(fullPath)
         };
         if (entry.isDirectory()) {
           node.children = await this.getFileTree(fullPath, depth + 1, maxDepth);
@@ -960,17 +995,22 @@ class TerminalManager {
   createSession(id, shell, cwd) {
     try {
       const isWin = os.platform() === "win32";
-      const shellCmd = shell || (isWin ? "powershell.exe" : "bash");
-      const terminalProcess = child_process.spawn(shellCmd, [], {
+      let shellCmd = shell;
+      let shellArgs = [];
+      if (isWin) {
+        shellCmd = shell || "powershell.exe";
+        shellArgs = ["-NoProfile", "-ExecutionPolicy", "Bypass"];
+      } else {
+        shellCmd = shell || "/bin/bash";
+      }
+      const terminalProcess = child_process.spawn(shellCmd, shellArgs, {
         cwd,
-        env: process.env,
+        env: { ...process.env, TERM: "xterm-256color" },
         shell: false
-        // We are spawning the shell itself
       });
       const normalizeOutput = (data) => {
         let str = data.toString();
-        str = str.replace(/(?<!\r)\n/g, "\r\n");
-        return str;
+        return str.replace(/\r?\n/g, "\r\n");
       };
       terminalProcess.stdout.on("data", (data) => {
         this.window?.webContents.send("terminal:data", { id, data: normalizeOutput(data) });

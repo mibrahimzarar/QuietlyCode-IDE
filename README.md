@@ -1,6 +1,6 @@
 # BitNet IDE
 
-> A calm, local, private AI pair-programmer. No cloud. No telemetry. No distractions.
+A calm, local, private AI pair-programmer. No cloud. No telemetry. No distractions.
 
 **Offline-First Local AI IDE** powered by [BitNet.cpp](https://github.com/microsoft/BitNet) for local 1-bit LLM inference.
 

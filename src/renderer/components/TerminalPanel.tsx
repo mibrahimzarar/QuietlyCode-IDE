@@ -38,11 +38,18 @@ export default function TerminalPanel() {
         }
     }, [shell])
 
+    const inputLengthsRef = useRef<Record<string, number>>({})
+
     // Incoming data handler
     useEffect(() => {
         const unsubData = window.electronAPI.onTerminalData((data) => {
             const session = sessions.find(s => s.id === data.id)
             if (session && session.instance) {
+                // If we see a newline or carriage return from the shell, 
+                // it likely means a new prompt is starting, so reset tracking.
+                if (data.data.includes('\n') || data.data.includes('\r')) {
+                    inputLengthsRef.current[data.id] = 0
+                }
                 session.instance.write(data.data)
             }
         })
@@ -108,29 +115,31 @@ export default function TerminalPanel() {
         const term = new Terminal({
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
             fontSize: 13,
-            lineHeight: 1.4,
+            lineHeight: 1.2,
             cursorBlink: true,
             cursorStyle: 'bar',
+            allowTransparency: true,
+            convertEol: true,
             theme: {
-                background: '#1a1b2e',
+                background: 'rgba(26, 27, 46, 0.5)', /* Semi-transparent background */
                 foreground: '#eaeaf2',
                 cursor: '#7c6cf0',
-                selectionBackground: '#3a3a6840',
+                selectionBackground: 'rgba(124, 108, 240, 0.3)',
                 black: '#1a1b2e',
-                red: '#e8705a',
-                green: '#2ecc9a',
-                yellow: '#f0c060', // bright yellow
-                blue: '#6cb4ff', // bright blue
+                red: '#ff6b6b',
+                green: '#51cf66',
+                yellow: '#fcc419',
+                blue: '#339af0',
                 magenta: '#a8a0ff',
-                cyan: '#89ddff',
+                cyan: '#22b8cf',
                 white: '#eaeaf2',
                 brightBlack: '#7878a0',
-                brightRed: '#e8705a',
-                brightGreen: '#2ecc9a',
-                brightYellow: '#f0c060',
-                brightBlue: '#6cb4ff',
-                brightMagenta: '#a8a0ff',
-                brightCyan: '#89ddff',
+                brightRed: '#ff8787',
+                brightGreen: '#69db7c',
+                brightYellow: '#ffd43b',
+                brightBlue: '#4dabf7',
+                brightMagenta: '#b197fc',
+                brightCyan: '#3bc9db',
                 brightWhite: '#ffffff',
             }
         })
@@ -139,11 +148,37 @@ export default function TerminalPanel() {
         term.loadAddon(fitAddon)
         term.open(session.containerRef.current)
 
+        // Force font antialiasing
+        if (term.element) {
+            const style = term.element.style as any
+            style.WebkitFontSmoothing = 'antialiased'
+            style.MozOsxFontSmoothing = 'grayscale'
+        }
+
         // Wait a tick for DOM to update
         setTimeout(() => fitAddon.fit(), 10)
 
         term.onData((data) => {
-            window.electronAPI.writeTerminal(session.id, data)
+            if (data === '\r') {
+                inputLengthsRef.current[session.id] = 0
+                window.electronAPI.writeTerminal(session.id, data)
+            } else if (data === '\x7f' || data === '\x08') { // Backspace or Del
+                if ((inputLengthsRef.current[session.id] || 0) > 0) {
+                    inputLengthsRef.current[session.id]--
+                    // Send Remote Erase sequence: Backspace + Space + Backspace
+                    // This forces the shell to erase the character on screen correctly.
+                    window.electronAPI.writeTerminal(session.id, '\x08 \x08')
+                }
+            } else {
+                // Count printable characters
+                for (let i = 0; i < data.length; i++) {
+                    const code = data.charCodeAt(i)
+                    if (code >= 32 && code !== 127) {
+                        inputLengthsRef.current[session.id] = (inputLengthsRef.current[session.id] || 0) + 1
+                    }
+                }
+                window.electronAPI.writeTerminal(session.id, data)
+            }
         })
 
         // Update session object
@@ -178,29 +213,34 @@ export default function TerminalPanel() {
                             onClick={() => { setActiveSessionId(s.id); setSplitMode(false) }}
                         >
                             <TerminalIcon size={12} />
-                            {s.title}
-                            <X size={10} onClick={(e) => { e.stopPropagation(); closeSession(s.id) }} style={{ marginLeft: 6, opacity: 0.6 }} />
+                            <span>{s.title.toLowerCase()}</span>
+                            <X
+                                size={10}
+                                className="tab-close-icon"
+                                onClick={(e) => { e.stopPropagation(); closeSession(s.id) }}
+                                style={{ marginLeft: 6, opacity: 0.4 }}
+                            />
                         </button>
                     ))}
                     <button className="btn btn-ghost btn-icon" onClick={createNewSession} title="New Terminal">
-                        <Plus size={12} />
+                        <Plus size={14} />
                     </button>
                 </div>
 
                 <div className="bottom-panel-actions">
                     <div className="terminal-shell-select">
-                        <span style={{ fontSize: 10, opacity: 0.5, marginRight: 4 }}>{shell && shell.split(/[\\/]/).pop()}</span>
+                        <span>{shell && shell.split(/[\\/]/).pop()}</span>
                     </div>
 
                     <button className={`btn btn-ghost btn-icon ${splitMode ? 'active' : ''}`} onClick={() => setSplitMode(!splitMode)} title="Split View">
-                        <SplitSquareHorizontal size={12} />
+                        <SplitSquareHorizontal size={14} />
                     </button>
 
                     <button className="btn btn-ghost btn-icon" onClick={() => setIsMaximized(!isMaximized)} title={isMaximized ? 'Restore' : 'Maximize'}>
-                        {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                        {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                     </button>
                     <button className="btn btn-ghost btn-icon" onClick={() => dispatch({ type: 'TOGGLE_TERMINAL' })} title="Close Panel">
-                        <X size={12} />
+                        <X size={14} />
                     </button>
                 </div>
             </div>
@@ -220,32 +260,6 @@ export default function TerminalPanel() {
                     </div>
                 )}
             </div>
-
-            <style>{`
-                .terminal-content-area {
-                    flex: 1;
-                    position: relative;
-                    overflow: hidden;
-                    display: flex;
-                    background: #1a1b2e;
-                }
-                .terminal-instance {
-                    width: 100%;
-                    height: 100%;
-                    padding-left: 12px;
-                    padding-top: 8px;
-                }
-                .terminal-instance.hidden {
-                    display: none;
-                }
-                .terminal-instance.split {
-                    width: 50%;
-                    border-right: 1px solid var(--border-color);
-                }
-                .terminal-instance.split:last-child {
-                    border-right: none;
-                }
-            `}</style>
         </div>
     )
 }

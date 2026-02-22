@@ -24,23 +24,26 @@ export class TerminalManager {
     createSession(id: string, shell: string, cwd: string) {
         try {
             const isWin = platform() === 'win32'
-            const shellCmd = shell || (isWin ? 'powershell.exe' : 'bash')
+            let shellCmd = shell
+            let shellArgs: string[] = []
 
-            // Use shell: true for better compatibility with some commands, 
-            // but for interactive shell persistence we spawn the shell executable itself.
-            const terminalProcess = spawn(shellCmd, [], {
+            if (isWin) {
+                shellCmd = shell || 'powershell.exe'
+                shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass']
+            } else {
+                shellCmd = shell || '/bin/bash'
+            }
+
+            const terminalProcess = spawn(shellCmd, shellArgs, {
                 cwd,
-                env: process.env,
-                shell: false // We are spawning the shell itself
+                env: { ...process.env, TERM: 'xterm-256color' },
+                shell: false
             })
 
-            // Xterm.js requires standard \r\n carriages to return to column 0 on newlines.
-            // Raw spawn pipes often just yield \n which creates diagonal cascading text.
             const normalizeOutput = (data: any) => {
                 let str = data.toString()
-                // Replace bare \n that aren't preceded by \r with \r\n
-                str = str.replace(/(?<!\r)\n/g, '\r\n')
-                return str
+                // Normalize line endings for xterm.js
+                return str.replace(/\r?\n/g, '\r\n')
             }
 
             terminalProcess.stdout.on('data', (data: any) => {
