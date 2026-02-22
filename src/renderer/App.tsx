@@ -12,11 +12,34 @@ import CommandPalette from './components/CommandPalette'
 import DiffPreview from './components/DiffPreview'
 import ContextMenu from './components/ContextMenu'
 import TerminalPanel from './components/TerminalPanel'
+import ProblemsPanel from './components/ProblemsPanel'
 
 export default function App() {
     const { state, dispatch } = useApp()
+    const [bottomTab, setBottomTab] = React.useState<'terminal' | 'problems'>('terminal')
+    const [isBottomPanelMaximized, setIsBottomPanelMaximized] = React.useState(false)
 
-    // Load settings on mount
+    const toggleBottomPanelMaximized = useCallback(() => {
+        setIsBottomPanelMaximized(prev => !prev)
+    }, [])
+
+    // Performance optimization: debounce project-wide linting
+    const runLinting = useCallback(async () => {
+        if (!state.projectPath) return
+        const result = await window.electronAPI.lintCodebase(state.projectPath)
+        if (result.success && result.problems) {
+            dispatch({ type: 'SET_PROBLEMS', problems: result.problems })
+        }
+    }, [state.projectPath, dispatch])
+
+    // Run linting on initial project load
+    useEffect(() => {
+        if (state.projectPath && state.screen === 'ide') {
+            runLinting()
+        }
+    }, [state.projectPath, state.screen, runLinting])
+
+    // Load settings and restore session on mount
     useEffect(() => {
         async function init() {
             try {
@@ -26,6 +49,43 @@ export default function App() {
                 // If setup is complete, go to IDE
                 if (settings.setupComplete) {
                     dispatch({ type: 'SET_SCREEN', screen: 'ide' })
+
+                    // Restore session
+                    if (settings.lastProjectPath) {
+                        const tree = await window.electronAPI.getFileTree(settings.lastProjectPath)
+                        dispatch({ type: 'SET_PROJECT', path: settings.lastProjectPath, tree })
+
+                        // Restore open files
+                        for (const filePath of settings.lastOpenFiles) {
+                            const result = await window.electronAPI.readFile(filePath)
+                            if (result.success && result.content !== undefined) {
+                                const name = filePath.split('\\').pop() || filePath
+                                const ext = name.split('.').pop()?.toLowerCase() || ''
+                                const langMap: Record<string, string> = {
+                                    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+                                    py: 'python', rs: 'rust', go: 'go', java: 'java', cpp: 'cpp', c: 'c',
+                                    h: 'c', hpp: 'cpp', css: 'css', html: 'html', json: 'json', md: 'markdown',
+                                    yaml: 'yaml', yml: 'yaml', xml: 'xml', sh: 'shell', sql: 'sql',
+                                    rb: 'ruby', php: 'php', swift: 'swift', kt: 'kotlin', toml: 'toml'
+                                }
+                                dispatch({
+                                    type: 'OPEN_FILE',
+                                    file: {
+                                        path: filePath,
+                                        name,
+                                        content: result.content,
+                                        language: langMap[ext] || 'plaintext',
+                                        isDirty: false
+                                    }
+                                })
+                            }
+                        }
+
+                        // Restore active file
+                        if (settings.lastActiveFile) {
+                            dispatch({ type: 'SET_ACTIVE_FILE', path: settings.lastActiveFile })
+                        }
+                    }
                 }
             } catch (e) {
                 console.error('Failed to load settings:', e)
@@ -33,6 +93,23 @@ export default function App() {
         }
         init()
     }, [])
+
+    // Save session when it changes
+    useEffect(() => {
+        if (state.screen === 'ide') {
+            const lastProjectPath = state.projectPath
+            const lastOpenFiles = state.openFiles.map(f => f.path)
+            const lastActiveFile = state.activeFilePath
+
+            window.electronAPI.saveSettings({
+                lastProjectPath,
+                lastOpenFiles,
+                lastActiveFile
+            }).catch(err => {
+                console.error('Failed to save session settings:', err)
+            })
+        }
+    }, [state.projectPath, state.openFiles.length, state.activeFilePath, state.screen])
 
     // Apply theme
     useEffect(() => {
@@ -87,6 +164,8 @@ export default function App() {
             if (state.projectPath) {
                 const tree = await window.electronAPI.getFileTree(state.projectPath)
                 dispatch({ type: 'SET_FILE_TREE', tree })
+                // Trigger project-wide linting
+                runLinting()
             }
         }
     }, [state.openFiles, state.activeFilePath, state.projectPath, dispatch])
@@ -161,7 +240,41 @@ export default function App() {
                             <TabBar />
                             <Editor />
                         </div>
-                        {state.terminalVisible && <TerminalPanel />}
+
+                        {state.terminalVisible && (
+                            <div className={`bottom-panel-container ${isBottomPanelMaximized ? 'maximized' : ''}`}>
+                                <div className="bottom-panel-tabs">
+                                    <div
+                                        className={`bottom-tab ${bottomTab === 'terminal' ? 'active' : ''}`}
+                                        onClick={() => setBottomTab('terminal')}
+                                    >
+                                        TERMINAL
+                                    </div>
+                                    <div
+                                        className={`bottom-tab ${bottomTab === 'problems' ? 'active' : ''}`}
+                                        onClick={() => setBottomTab('problems')}
+                                    >
+                                        PROBLEMS
+                                        {state.problems.length > 0 && (
+                                            <span className="bottom-tab-badge">{state.problems.length}</span>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="bottom-panel-content">
+                                    {bottomTab === 'terminal' ? (
+                                        <TerminalPanel
+                                            isMaximized={isBottomPanelMaximized}
+                                            onToggleMaximize={toggleBottomPanelMaximized}
+                                        />
+                                    ) : (
+                                        <ProblemsPanel
+                                            isMaximized={isBottomPanelMaximized}
+                                            onToggleMaximize={toggleBottomPanelMaximized}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                     {state.chatPanelVisible && <ChatPanel />}
                 </div>

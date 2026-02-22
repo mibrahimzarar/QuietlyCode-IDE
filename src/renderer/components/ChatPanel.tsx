@@ -8,11 +8,17 @@ import {
 } from 'lucide-react'
 
 // Types for parsed file actions
+interface FilePatch {
+    search: string
+    replace: string
+}
+
 interface FileAction {
     id: string
-    type: 'create' | 'edit' | 'delete'
+    type: 'create' | 'edit' | 'delete' | 'patch'
     path: string
     content?: string
+    patches?: FilePatch[]
     status: 'idle' | 'pending' | 'applied' | 'rejected' | 'error'
     error?: string
 }
@@ -378,7 +384,6 @@ export default function ChatPanel() {
                 return `${prefix} @${displayPath} `
             })
 
-            // Focus textarea
             setTimeout(() => {
                 textareaRef.current?.focus()
                 // Move cursor to end
@@ -386,6 +391,31 @@ export default function ChatPanel() {
             }, 100)
         }
     }, [state.pendingChatMention])
+
+    // Handle pending terminal context
+    useEffect(() => {
+        if (state.pendingChatContext) {
+            const context = state.pendingChatContext
+            dispatch({ type: 'APPEND_TO_CHAT', content: '' }) // Clear it
+
+            setInput(prev => {
+                const prefix = prev.trim() ? prev.trimEnd() + '\n\n' : ''
+                return `${prefix}Terminal Output:\n\`\`\`\n${context}\n\`\`\``
+            })
+
+            // Focus textarea
+            setTimeout(() => {
+                textareaRef.current?.focus()
+                // Move cursor to end
+                textareaRef.current?.setSelectionRange(10000, 10000)
+                // Trigger auto-resize
+                if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto'
+                    textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px'
+                }
+            }, 100)
+        }
+    }, [state.pendingChatContext])
 
     function handleTextareaInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
         const val = e.target.value
@@ -519,6 +549,8 @@ export default function ChatPanel() {
                 if (result.success && action.content) {
                     result = await window.electronAPI.writeFile(targetPath, action.content)
                 }
+            } else if (action.type === 'patch') {
+                result = await window.electronAPI.patchFile(targetPath, action.patches || [])
             } else {
                 // edit
                 result = await window.electronAPI.writeFile(targetPath, action.content || '')
@@ -567,14 +599,6 @@ export default function ChatPanel() {
                         title="Clear Chat"
                     >
                         <Trash2 size={14} />
-                    </button>
-                    <button
-                        className="btn btn-ghost btn-icon"
-                        onClick={handleIndexCodebase}
-                        disabled={!state.projectPath || indexing}
-                        title={indexing ? `Indexing... ${indexingProgress ? `${Math.round(indexingProgress.current / indexingProgress.total * 100)}%` : ''}` : "Index Codebase for Search"}
-                    >
-                        {indexing ? <Loader size={14} className="spinner" /> : <Brain size={14} />}
                     </button>
                 </div>
             </div>
@@ -755,19 +779,22 @@ function FileActionCard({
     const iconMap = {
         create: <FilePlus size={14} />,
         edit: <FileEdit size={14} />,
-        delete: <FileX size={14} />
+        delete: <FileX size={14} />,
+        patch: <Wand2 size={14} />
     }
 
     const labelMap = {
         create: 'Create file',
         edit: 'Edit file',
-        delete: 'Delete file'
+        delete: 'Delete file',
+        patch: 'Patch file'
     }
 
     const colorMap = {
         create: 'var(--success)',
         edit: 'var(--accent-primary)',
-        delete: 'var(--error)'
+        delete: 'var(--error)',
+        patch: 'var(--info)'
     }
 
     return (
@@ -801,9 +828,27 @@ function FileActionCard({
             </div>
 
             {/* Show preview for create/edit */}
-            {action.content && action.type !== 'delete' && (
+            {action.content && action.type !== 'delete' && action.type !== 'patch' && (
                 <div className="file-action-preview">
                     <pre><code>{action.content.length > 500 ? action.content.slice(0, 500) + '\n…' : action.content}</code></pre>
+                </div>
+            )}
+
+            {/* Show preview for patches */}
+            {action.type === 'patch' && action.patches && action.patches.length > 0 && (
+                <div className="file-action-preview patch">
+                    {action.patches.map((p, idx) => (
+                        <div key={idx} className="patch-block">
+                            <div className="patch-search">
+                                <span className="patch-marker remove">-</span>
+                                <pre><code>{p.search}</code></pre>
+                            </div>
+                            <div className="patch-replace">
+                                <span className="patch-marker add">+</span>
+                                <pre><code>{p.replace}</code></pre>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             )}
 
@@ -829,7 +874,7 @@ function FileActionCard({
 function parseFileActions(messageId: string, text: string): { cleanText: string; actions: FileAction[] } {
     const actions: FileAction[] = []
     // Pattern: ```FILE_ACTION:type:path\ncontent\n```
-    const regex = /```FILE_ACTION:(create|edit|delete):([^\n]+)\n([\s\S]*?)```/g
+    const regex = /```FILE_ACTION:(create|edit|delete|patch):([^\n]+)\n([\s\S]*?)```/g
 
     let cleanText = text
     let match: RegExpExecArray | null
@@ -838,11 +883,26 @@ function parseFileActions(messageId: string, text: string): { cleanText: string;
         const [fullMatch, type, path, content] = match
         const action: FileAction = {
             id: `fa-${messageId}-${actions.length}`,
-            type: type as 'create' | 'edit' | 'delete',
+            type: type as 'create' | 'edit' | 'delete' | 'patch',
             path: path.trim(),
-            content: type !== 'delete' ? content.trim() : undefined,
-            status: 'idle' // fresh — shows apply/reject buttons
+            status: 'idle'
         }
+
+        if (type === 'patch') {
+            const patches: FilePatch[] = []
+            const patchRegex = /<<<< SEARCH\n([\s\S]*?)\n====\n([\s\S]*?)\n>>>>/g
+            let pMatch: RegExpExecArray | null
+            while ((pMatch = patchRegex.exec(content)) !== null) {
+                patches.push({
+                    search: pMatch[1],
+                    replace: pMatch[2]
+                })
+            }
+            action.patches = patches
+        } else if (type !== 'delete') {
+            action.content = content.trim()
+        }
+
         actions.push(action)
         cleanText = cleanText.replace(fullMatch, `[[FILE_ACTION_${actions.length - 1}]]`)
     }

@@ -223,6 +223,21 @@ export default function Sidebar() {
                             : getFileIcon(node.name)
                         }
                         <span>{node.name}</span>
+
+                        {/* Error indicator */}
+                        {!node.isDirectory && (
+                            (() => {
+                                const fileProblems = state.problems.filter(p => p.path === node.path)
+                                if (fileProblems.length > 0) {
+                                    return (
+                                        <span className="file-error-badge">
+                                            {fileProblems.length}
+                                        </span>
+                                    )
+                                }
+                                return null
+                            })()
+                        )}
                     </div>
 
                     {/* New item input inside expanded directory */}
@@ -354,7 +369,7 @@ export default function Sidebar() {
                         )}
                         {!isSearching && searchResults.length === 0 && searchQuery && (
                             <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
-                                No results found
+                                Searching...
                             </div>
                         )}
                         {searchResults.map((r, i) => (

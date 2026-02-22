@@ -19,6 +19,8 @@ declare global {
             openFolder: () => Promise<{ path: string; tree: any[] } | null>
             readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
             writeFile: (path: string, content: string) => Promise<{ success: boolean; error?: string }>
+            patchFile: (path: string, patches: { search: string; replace: string }[]) => Promise<{ success: boolean; error?: string }>
+            lintCodebase: (projectPath: string) => Promise<{ success: boolean; problems?: any[]; error?: string }>
             getFileTree: (path: string) => Promise<any[]>
             createFile: (path: string) => Promise<{ success: boolean; error?: string }>
             createFolder: (path: string) => Promise<{ success: boolean; error?: string }>

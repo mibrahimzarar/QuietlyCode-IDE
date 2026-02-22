@@ -56,7 +56,7 @@ export class FileService {
         }
     }
 
-    async getFileTree(dirPath: string, depth: number = 0, maxDepth: number = 6): Promise<FileTreeNode[]> {
+    async getFileTree(dirPath: string, depth: number = 0, maxDepth: number = 20): Promise<FileTreeNode[]> {
         if (depth === 0) {
             await this.getGitStatus(dirPath)
         }
@@ -75,7 +75,6 @@ export class FileService {
 
             for (const entry of sorted) {
                 if (IGNORED_DIRS.has(entry.name) || IGNORED_FILES.has(entry.name)) continue
-                if (entry.name.startsWith('.') && depth === 0) continue
 
                 const fullPath = join(dirPath, entry.name)
                 const node: FileTreeNode = {
@@ -110,6 +109,30 @@ export class FileService {
 
     writeFile(filePath: string, content: string): { success: boolean; error?: string } {
         try {
+            writeFileSync(filePath, content, 'utf-8')
+            return { success: true }
+        } catch (err: any) {
+            return { success: false, error: err.message }
+        }
+    }
+
+    patchFile(filePath: string, patches: { search: string; replace: string }[]): { success: boolean; error?: string } {
+        try {
+            if (!existsSync(filePath)) {
+                return { success: false, error: `File not found: ${filePath}` }
+            }
+
+            let content = readFileSync(filePath, 'utf-8')
+
+            for (const patch of patches) {
+                if (!content.includes(patch.search)) {
+                    return { success: false, error: `Search block not found in file: ${patch.search.substring(0, 50)}...` }
+                }
+                // Use split/join to replace all occurrences if needed, but usually patches should be unique
+                // Given the context, we'll replace the first occurrence as standard for LLM patching
+                content = content.replace(patch.search, patch.replace)
+            }
+
             writeFileSync(filePath, content, 'utf-8')
             return { success: true }
         } catch (err: any) {

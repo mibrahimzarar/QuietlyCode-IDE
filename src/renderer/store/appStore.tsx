@@ -25,14 +25,11 @@ export interface ChatMessage {
 }
 
 export interface CodeProblem {
-    message: string
-    source: string
-    severity: number
-    startLineNumber: number
-    startColumn: number
-    endLineNumber: number
-    endColumn: number
     path: string
+    message: string
+    line: number
+    character: number
+    severity: number // 1: Error, 2: Warning
 }
 
 export interface AppSettings {
@@ -45,6 +42,9 @@ export interface AppSettings {
     theme: 'dark' | 'light'
     modelsDirectory: string
     setupComplete: boolean
+    lastProjectPath: string | null
+    lastOpenFiles: string[]
+    lastActiveFile: string | null
 }
 
 export type AppScreen = 'setup' | 'ide'
@@ -83,6 +83,7 @@ export interface AppState {
         error: string | null
     }
     pendingChatMention: string | null
+    pendingChatContext: string | null
     problems: CodeProblem[]
 }
 
@@ -121,6 +122,7 @@ type Action =
     | { type: 'DOWNLOAD_COMPLETE'; modelId: string }
     | { type: 'DOWNLOAD_ERROR'; modelId: string; error: string }
     | { type: 'MENTION_FILE'; filename: string }
+    | { type: 'APPEND_TO_CHAT'; content: string }
     | { type: 'SET_PROBLEMS'; problems: CodeProblem[] }
 
 const defaultSettings: AppSettings = {
@@ -132,7 +134,10 @@ const defaultSettings: AppSettings = {
     threads: 4,
     theme: 'dark',
     modelsDirectory: '',
-    setupComplete: false
+    setupComplete: false,
+    lastProjectPath: null,
+    lastOpenFiles: [],
+    lastActiveFile: null
 }
 
 const initialState: AppState = {
@@ -161,6 +166,7 @@ const initialState: AppState = {
         error: null
     },
     pendingChatMention: null,
+    pendingChatContext: null,
     problems: []
 }
 
@@ -310,6 +316,9 @@ function reducer(state: AppState, action: Action): AppState {
 
         case 'MENTION_FILE':
             return { ...state, pendingChatMention: action.filename }
+
+        case 'APPEND_TO_CHAT':
+            return { ...state, pendingChatContext: action.content }
 
         case 'SET_PROBLEMS':
             return { ...state, problems: action.problems }

@@ -33,14 +33,14 @@ const IGNORED_FILES = /* @__PURE__ */ new Set([
   "Thumbs.db",
   "desktop.ini"
 ]);
-const execAsync = util.promisify(child_process.exec);
+const execAsync$1 = util.promisify(child_process.exec);
 class FileService {
   constructor() {
     this.gitStatusMap = /* @__PURE__ */ new Map();
   }
   async getGitStatus(projectPath) {
     try {
-      const { stdout } = await execAsync("git status --porcelain=v1 --ignored", { cwd: projectPath });
+      const { stdout } = await execAsync$1("git status --porcelain=v1 --ignored", { cwd: projectPath });
       const map = /* @__PURE__ */ new Map();
       stdout.split("\n").forEach((line) => {
         if (!line || line.length < 3) return;
@@ -64,7 +64,7 @@ class FileService {
       this.gitStatusMap = /* @__PURE__ */ new Map();
     }
   }
-  async getFileTree(dirPath, depth = 0, maxDepth = 6) {
+  async getFileTree(dirPath, depth = 0, maxDepth = 20) {
     if (depth === 0) {
       await this.getGitStatus(dirPath);
     }
@@ -79,7 +79,6 @@ class FileService {
       });
       for (const entry of sorted) {
         if (IGNORED_DIRS.has(entry.name) || IGNORED_FILES.has(entry.name)) continue;
-        if (entry.name.startsWith(".") && depth === 0) continue;
         const fullPath = path.join(dirPath, entry.name);
         const node = {
           name: entry.name,
@@ -108,6 +107,24 @@ class FileService {
   }
   writeFile(filePath, content) {
     try {
+      fs.writeFileSync(filePath, content, "utf-8");
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+  patchFile(filePath, patches) {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: `File not found: ${filePath}` };
+      }
+      let content = fs.readFileSync(filePath, "utf-8");
+      for (const patch of patches) {
+        if (!content.includes(patch.search)) {
+          return { success: false, error: `Search block not found in file: ${patch.search.substring(0, 50)}...` };
+        }
+        content = content.replace(patch.search, patch.replace);
+      }
       fs.writeFileSync(filePath, content, "utf-8");
       return { success: true };
     } catch (err) {
@@ -1016,7 +1033,8 @@ class TerminalManager {
         this.window?.webContents.send("terminal:data", { id, data: normalizeOutput(data) });
       });
       terminalProcess.stderr.on("data", (data) => {
-        this.window?.webContents.send("terminal:data", { id, data: normalizeOutput(data) });
+        const normalized = normalizeOutput(data);
+        this.window?.webContents.send("terminal:data", { id, data: `\x1B[31m${normalized}\x1B[0m` });
       });
       terminalProcess.on("exit", (code) => {
         this.window?.webContents.send("terminal:exit", { id, code: code || 0 });
@@ -1058,6 +1076,47 @@ class TerminalManager {
       shells.push("/bin/zsh");
     }
     return shells;
+  }
+}
+const execAsync = util.promisify(child_process.exec);
+class DiagnosticService {
+  async lintCodebase(projectPath) {
+    if (!projectPath || !fs.existsSync(projectPath)) {
+      return { success: false, error: "Project path not found" };
+    }
+    try {
+      const { stdout, stderr } = await execAsync("npx tsc --noEmit --pretty false", {
+        cwd: projectPath,
+        maxBuffer: 10 * 1024 * 1024
+        // 10MB buffer
+      }).catch((err) => {
+        return { stdout: err.stdout, stderr: err.stderr };
+      });
+      const problems = this.parseTscOutput(stdout, projectPath);
+      return { success: true, problems };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+  parseTscOutput(output, projectPath) {
+    const problems = [];
+    const lines = output.split("\n");
+    const regex = /^(.+)\((\d+),(\d+)\): error TS\d+: (.*)$/;
+    for (const line of lines) {
+      const match = line.match(regex);
+      if (match) {
+        const [_, relativePath, lineStr, charStr, message] = match;
+        problems.push({
+          path: path.join(projectPath, relativePath),
+          line: parseInt(lineStr),
+          character: parseInt(charStr),
+          message: message.trim(),
+          severity: 1
+          // Error
+        });
+      }
+    }
+    return problems;
   }
 }
 class VectorStore {
@@ -1216,6 +1275,7 @@ let mainWindow = null;
 let fileService;
 let aiService;
 let modelDownloader;
+let diagnosticService;
 const SETTINGS_PATH = path.join(electron.app.getPath("userData"), "settings.json");
 function getDefaultSettings() {
   return {
@@ -1227,7 +1287,10 @@ function getDefaultSettings() {
     threads: 4,
     theme: "dark",
     modelsDirectory: path.join(electron.app.getPath("userData"), "models"),
-    setupComplete: false
+    setupComplete: false,
+    lastProjectPath: null,
+    lastOpenFiles: [],
+    lastActiveFile: null
   };
 }
 function loadSettings() {
@@ -1287,6 +1350,7 @@ function setupIPC() {
   fileService = new FileService();
   aiService = new AIService();
   modelDownloader = new ModelDownloader();
+  diagnosticService = new DiagnosticService();
   electron.ipcMain.handle("window:minimize", () => mainWindow?.minimize());
   electron.ipcMain.handle("window:maximize", () => {
     if (mainWindow?.isMaximized()) {
@@ -1329,6 +1393,12 @@ function setupIPC() {
   });
   electron.ipcMain.handle("fs:writeFile", async (_event, filePath, content) => {
     return fileService.writeFile(filePath, content);
+  });
+  electron.ipcMain.handle("fs:patchFile", async (_event, filePath, patches) => {
+    return fileService.patchFile(filePath, patches);
+  });
+  electron.ipcMain.handle("fs:lintCodebase", async (_event, projectPath) => {
+    return diagnosticService.lintCodebase(projectPath);
   });
   electron.ipcMain.handle("fs:getFileTree", async (_event, folderPath) => {
     return fileService.getFileTree(folderPath);

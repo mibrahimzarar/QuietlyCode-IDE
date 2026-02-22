@@ -7,6 +7,7 @@ import { AIService } from './ai-service'
 import { ModelDownloader } from './model-downloader'
 import { BinaryDownloader } from './binary-downloader'
 import { TerminalManager } from './terminal-manager'
+import { DiagnosticService } from './diagnostic-service'
 import { VectorStore } from './rag/vector-store'
 import { CodebaseIndexer } from './rag/indexer'
 
@@ -14,6 +15,7 @@ let mainWindow: BrowserWindow | null = null
 let fileService: FileService
 let aiService: AIService
 let modelDownloader: ModelDownloader
+let diagnosticService: DiagnosticService
 
 const SETTINGS_PATH = join(app.getPath('userData'), 'settings.json')
 
@@ -27,6 +29,9 @@ interface AppSettings {
     theme: 'dark' | 'light'
     modelsDirectory: string
     setupComplete: boolean
+    lastProjectPath: string | null
+    lastOpenFiles: string[]
+    lastActiveFile: string | null
 }
 
 function getDefaultSettings(): AppSettings {
@@ -39,7 +44,10 @@ function getDefaultSettings(): AppSettings {
         threads: 4,
         theme: 'dark',
         modelsDirectory: join(app.getPath('userData'), 'models'),
-        setupComplete: false
+        setupComplete: false,
+        lastProjectPath: null,
+        lastOpenFiles: [],
+        lastActiveFile: null
     }
 }
 
@@ -110,6 +118,7 @@ function setupIPC(): void {
     fileService = new FileService()
     aiService = new AIService()
     modelDownloader = new ModelDownloader()
+    diagnosticService = new DiagnosticService()
 
     // --- Window Controls ---
     ipcMain.handle('window:minimize', () => mainWindow?.minimize())
@@ -161,6 +170,14 @@ function setupIPC(): void {
 
     ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
         return fileService.writeFile(filePath, content)
+    })
+
+    ipcMain.handle('fs:patchFile', async (_event, filePath: string, patches: { search: string; replace: string }[]) => {
+        return fileService.patchFile(filePath, patches)
+    })
+
+    ipcMain.handle('fs:lintCodebase', async (_event, projectPath: string) => {
+        return diagnosticService.lintCodebase(projectPath)
     })
 
     ipcMain.handle('fs:getFileTree', async (_event, folderPath: string) => {
@@ -502,6 +519,10 @@ function setupIPC(): void {
 }
 
 app.whenReady().then(() => {
+    // Suppress Chromium internal network logs (noise) and ignore cert errors in dev
+    app.commandLine.appendSwitch('log-level', '3')
+    app.commandLine.appendSwitch('ignore-certificate-errors')
+
     setupIPC()
     createWindow()
 

@@ -51,7 +51,9 @@ export class TerminalManager {
             })
 
             terminalProcess.stderr.on('data', (data: any) => {
-                this.window?.webContents.send('terminal:data', { id, data: normalizeOutput(data) })
+                const normalized = normalizeOutput(data)
+                // Wrap in ANSI red color: \x1b[31m ... \x1b[0m
+                this.window?.webContents.send('terminal:data', { id, data: `\x1b[31m${normalized}\x1b[0m` })
             })
 
             terminalProcess.on('exit', (code: number | null) => {
