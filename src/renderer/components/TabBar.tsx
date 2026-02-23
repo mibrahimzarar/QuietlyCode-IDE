@@ -12,10 +12,10 @@ export default function TabBar() {
             {state.openFiles.map((file) => (
                 <div
                     key={file.path}
-                    className={`tab ${state.activeFilePath === file.path ? 'active' : ''}`}
+                    className={`tab ${state.activeFilePath === file.path ? 'active' : ''} ${file.isDirty ? 'dirty' : ''}`}
                     onClick={() => dispatch({ type: 'SET_ACTIVE_FILE', path: file.path })}
+                    title={file.path}
                 >
-                    {file.isDirty && <span className="tab-dirty" />}
                     <span>{file.name}</span>
                     <button
                         className="tab-close"
@@ -23,6 +23,7 @@ export default function TabBar() {
                             e.stopPropagation()
                             dispatch({ type: 'CLOSE_FILE', path: file.path })
                         }}
+                        title="Close"
                     >
                         <X size={12} />
                     </button>

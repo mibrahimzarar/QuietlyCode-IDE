@@ -47,7 +47,7 @@ export interface AppSettings {
     lastActiveFile: string | null
 }
 
-export type AppScreen = 'setup' | 'ide'
+export type AppScreen = 'loading' | 'setup' | 'ide'
 
 export interface AppState {
     screen: AppScreen
@@ -75,6 +75,11 @@ export interface AppState {
     } | null
     contextMenu: { x: number; y: number; items: ContextMenuItem[] } | null
     terminalVisible: boolean
+    showQuickOpen: boolean
+    splitEditor: {
+        enabled: boolean
+        secondaryFilePath: string | null
+    }
     downloadStatus: {
         isDownloading: boolean
         progress: number
@@ -124,6 +129,9 @@ type Action =
     | { type: 'MENTION_FILE'; filename: string }
     | { type: 'APPEND_TO_CHAT'; content: string }
     | { type: 'SET_PROBLEMS'; problems: CodeProblem[] }
+    | { type: 'TOGGLE_QUICK_OPEN' }
+    | { type: 'TOGGLE_SPLIT_EDITOR' }
+    | { type: 'SET_SECONDARY_FILE'; path: string | null }
 
 const defaultSettings: AppSettings = {
     modelPath: '',
@@ -141,7 +149,7 @@ const defaultSettings: AppSettings = {
 }
 
 const initialState: AppState = {
-    screen: 'setup',
+    screen: 'loading',
     projectPath: null,
     fileTree: [],
     openFiles: [],
@@ -158,6 +166,11 @@ const initialState: AppState = {
     diffPreview: null,
     contextMenu: null,
     terminalVisible: false,
+    showQuickOpen: false,
+    splitEditor: {
+        enabled: false,
+        secondaryFilePath: null
+    },
     downloadStatus: {
         isDownloading: false,
         progress: 0,
@@ -322,6 +335,29 @@ function reducer(state: AppState, action: Action): AppState {
 
         case 'SET_PROBLEMS':
             return { ...state, problems: action.problems }
+
+        case 'TOGGLE_QUICK_OPEN':
+            return { ...state, showQuickOpen: !state.showQuickOpen }
+
+        case 'TOGGLE_SPLIT_EDITOR':
+            return { 
+                ...state, 
+                splitEditor: { 
+                    ...state.splitEditor, 
+                    enabled: !state.splitEditor.enabled,
+                    secondaryFilePath: state.splitEditor.enabled ? null : state.splitEditor.secondaryFilePath
+                } 
+            }
+
+        case 'SET_SECONDARY_FILE':
+            return { 
+                ...state, 
+                splitEditor: { 
+                    ...state.splitEditor, 
+                    secondaryFilePath: action.path,
+                    enabled: action.path !== null ? true : state.splitEditor.enabled
+                } 
+            }
 
         default:
             return state

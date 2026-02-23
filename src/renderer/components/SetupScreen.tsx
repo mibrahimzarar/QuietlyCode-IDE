@@ -155,10 +155,10 @@ export default function SetupScreen() {
                 {/* ── Intro ── */}
                 {step === 'intro' && (
                     <div className="ws-intro">
-                        <div className="ws-intro-icon">
-                            <Cpu size={56} strokeWidth={1} />
+                        <div className="ws-intro-logo">
+                            <img src="./assets/logo.jpg" alt="QuietlyCode" className="ws-logo-img" />
                         </div>
-                        <h1 className="ws-title">BitNet IDE</h1>
+                        <h1 className="ws-title">QuietlyCode</h1>
                         <p className="ws-tagline">Private · Local · Intelligent</p>
                         <p className="ws-desc">
                             A calm, AI‑powered pair programmer running entirely on your machine.
@@ -175,7 +175,7 @@ export default function SetupScreen() {
                     <div className="ws-body">
                         <StepDots active={1} />
                         <h2>Environment Setup</h2>
-                        <p className="ws-subtitle">Configure where BitNet stores models and binaries.</p>
+                        <p className="ws-subtitle">Configure where QuietlyCode stores models and binaries.</p>
 
                         {/* Models dir */}
                         <div className="ws-field">

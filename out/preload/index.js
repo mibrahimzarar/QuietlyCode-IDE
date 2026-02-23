@@ -102,6 +102,73 @@ const electronAPI = {
     const listener = (_event, data) => callback(data);
     electron.ipcRenderer.on("rag:progress", listener);
     return () => electron.ipcRenderer.removeListener("rag:progress", listener);
+  },
+  // LSP
+  getDefinition: (filePath, line, character) => electron.ipcRenderer.invoke("lsp:definition", filePath, line, character),
+  getHover: (filePath, line, character) => electron.ipcRenderer.invoke("lsp:hover", filePath, line, character),
+  getDocumentSymbols: (filePath) => electron.ipcRenderer.invoke("lsp:documentSymbols", filePath),
+  // Git
+  isGitRepo: (projectPath) => electron.ipcRenderer.invoke("git:isRepo", projectPath),
+  getGitStatus: (projectPath) => electron.ipcRenderer.invoke("git:status", projectPath),
+  getGitBranches: (projectPath) => electron.ipcRenderer.invoke("git:branches", projectPath),
+  getCurrentBranch: (projectPath) => electron.ipcRenderer.invoke("git:currentBranch", projectPath),
+  getGitCommits: (projectPath, count) => electron.ipcRenderer.invoke("git:commits", projectPath, count || 20),
+  getGitDiff: (projectPath, filePath) => electron.ipcRenderer.invoke("git:diff", projectPath, filePath),
+  stageFile: (projectPath, filePath) => electron.ipcRenderer.invoke("git:stage", projectPath, filePath),
+  unstageFile: (projectPath, filePath) => electron.ipcRenderer.invoke("git:unstage", projectPath, filePath),
+  discardChanges: (projectPath, filePath) => electron.ipcRenderer.invoke("git:discard", projectPath, filePath),
+  commitChanges: (projectPath, message) => electron.ipcRenderer.invoke("git:commit", projectPath, message),
+  createBranch: (projectPath, branchName, checkout) => electron.ipcRenderer.invoke("git:createBranch", projectPath, branchName, checkout || false),
+  checkoutBranch: (projectPath, branchName) => electron.ipcRenderer.invoke("git:checkout", projectPath, branchName),
+  pullChanges: (projectPath) => electron.ipcRenderer.invoke("git:pull", projectPath),
+  pushChanges: (projectPath) => electron.ipcRenderer.invoke("git:push", projectPath),
+  // Format
+  formatDocument: (filePath, projectPath) => electron.ipcRenderer.invoke("format:document", filePath, projectPath),
+  checkFormatting: (filePath, projectPath) => electron.ipcRenderer.invoke("format:check", filePath, projectPath),
+  getFormatConfig: (projectPath) => electron.ipcRenderer.invoke("format:config", projectPath),
+  // Debug
+  startNodeDebug: (scriptPath, cwd, args) => electron.ipcRenderer.invoke("debug:startNode", scriptPath, cwd, args),
+  startPythonDebug: (scriptPath, cwd, args) => electron.ipcRenderer.invoke("debug:startPython", scriptPath, cwd, args),
+  stopDebug: (sessionId) => electron.ipcRenderer.invoke("debug:stop", sessionId),
+  pauseDebug: (sessionId) => electron.ipcRenderer.invoke("debug:pause", sessionId),
+  continueDebug: (sessionId) => electron.ipcRenderer.invoke("debug:continue", sessionId),
+  stepOver: (sessionId) => electron.ipcRenderer.invoke("debug:stepOver", sessionId),
+  stepInto: (sessionId) => electron.ipcRenderer.invoke("debug:stepInto", sessionId),
+  stepOut: (sessionId) => electron.ipcRenderer.invoke("debug:stepOut", sessionId),
+  setBreakpoint: (sessionId, file, line, condition) => electron.ipcRenderer.invoke("debug:setBreakpoint", sessionId, file, line, condition),
+  removeBreakpoint: (sessionId, file, line) => electron.ipcRenderer.invoke("debug:removeBreakpoint", sessionId, file, line),
+  getBreakpoints: (sessionId, file) => electron.ipcRenderer.invoke("debug:getBreakpoints", sessionId, file),
+  getActiveDebugSessions: () => electron.ipcRenderer.invoke("debug:getActiveSessions"),
+  getDebugSessionInfo: (sessionId) => electron.ipcRenderer.invoke("debug:getSessionInfo", sessionId),
+  onDebugOutput: (callback) => {
+    const handler = (_event, data) => callback(data);
+    electron.ipcRenderer.on("debug:output", handler);
+    return () => electron.ipcRenderer.removeListener("debug:output", handler);
+  },
+  onDebugStarted: (callback) => {
+    const handler = (_event, data) => callback(data);
+    electron.ipcRenderer.on("debug:started", handler);
+    return () => electron.ipcRenderer.removeListener("debug:started", handler);
+  },
+  onDebugStopped: (callback) => {
+    const handler = (_event, data) => callback(data);
+    electron.ipcRenderer.on("debug:stopped", handler);
+    return () => electron.ipcRenderer.removeListener("debug:stopped", handler);
+  },
+  onDebugTerminated: (callback) => {
+    const handler = (_event, data) => callback(data);
+    electron.ipcRenderer.on("debug:terminated", handler);
+    return () => electron.ipcRenderer.removeListener("debug:terminated", handler);
+  },
+  onDebugPaused: (callback) => {
+    const handler = (_event, data) => callback(data);
+    electron.ipcRenderer.on("debug:paused", handler);
+    return () => electron.ipcRenderer.removeListener("debug:paused", handler);
+  },
+  onDebugContinued: (callback) => {
+    const handler = (_event, data) => callback(data);
+    electron.ipcRenderer.on("debug:continued", handler);
+    return () => electron.ipcRenderer.removeListener("debug:continued", handler);
   }
 };
 electron.contextBridge.exposeInMainWorld("electronAPI", electronAPI);

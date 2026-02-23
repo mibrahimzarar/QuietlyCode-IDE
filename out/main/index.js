@@ -1,4 +1,26 @@
 "use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 const electron = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -10,6 +32,26 @@ const axios = require("axios");
 const AdmZip = require("adm-zip");
 const os = require("os");
 const crypto = require("crypto");
+const node = require("vscode-jsonrpc/node");
+const events = require("events");
+function _interopNamespaceDefault(e) {
+  const n = Object.create(null, { [Symbol.toStringTag]: { value: "Module" } });
+  if (e) {
+    for (const k in e) {
+      if (k !== "default") {
+        const d = Object.getOwnPropertyDescriptor(e, k);
+        Object.defineProperty(n, k, d.get ? d : {
+          enumerable: true,
+          get: () => e[k]
+        });
+      }
+    }
+  }
+  n.default = e;
+  return Object.freeze(n);
+}
+const path__namespace = /* @__PURE__ */ _interopNamespaceDefault(path);
+const fs__namespace = /* @__PURE__ */ _interopNamespaceDefault(fs);
 const IGNORED_DIRS = /* @__PURE__ */ new Set([
   "node_modules",
   ".git",
@@ -33,14 +75,14 @@ const IGNORED_FILES = /* @__PURE__ */ new Set([
   "Thumbs.db",
   "desktop.ini"
 ]);
-const execAsync$1 = util.promisify(child_process.exec);
+const execAsync$3 = util.promisify(child_process.exec);
 class FileService {
   constructor() {
     this.gitStatusMap = /* @__PURE__ */ new Map();
   }
   async getGitStatus(projectPath) {
     try {
-      const { stdout } = await execAsync$1("git status --porcelain=v1 --ignored", { cwd: projectPath });
+      const { stdout } = await execAsync$3("git status --porcelain=v1 --ignored", { cwd: projectPath });
       const map = /* @__PURE__ */ new Map();
       stdout.split("\n").forEach((line) => {
         if (!line || line.length < 3) return;
@@ -80,16 +122,16 @@ class FileService {
       for (const entry of sorted) {
         if (IGNORED_DIRS.has(entry.name) || IGNORED_FILES.has(entry.name)) continue;
         const fullPath = path.join(dirPath, entry.name);
-        const node = {
+        const node2 = {
           name: entry.name,
           path: fullPath,
           isDirectory: entry.isDirectory(),
           gitStatus: this.gitStatusMap.get(fullPath)
         };
         if (entry.isDirectory()) {
-          node.children = await this.getFileTree(fullPath, depth + 1, maxDepth);
+          node2.children = await this.getFileTree(fullPath, depth + 1, maxDepth);
         }
-        nodes.push(node);
+        nodes.push(node2);
       }
       return nodes;
     } catch (err) {
@@ -1078,14 +1120,14 @@ class TerminalManager {
     return shells;
   }
 }
-const execAsync = util.promisify(child_process.exec);
+const execAsync$2 = util.promisify(child_process.exec);
 class DiagnosticService {
   async lintCodebase(projectPath) {
     if (!projectPath || !fs.existsSync(projectPath)) {
       return { success: false, error: "Project path not found" };
     }
     try {
-      const { stdout, stderr } = await execAsync("npx tsc --noEmit --pretty false", {
+      const { stdout, stderr } = await execAsync$2("npx tsc --noEmit --pretty false", {
         cwd: projectPath,
         maxBuffer: 10 * 1024 * 1024
         // 10MB buffer
@@ -1271,11 +1313,874 @@ class CodebaseIndexer {
     return chunks;
   }
 }
+class LSPService {
+  constructor() {
+    this.clients = /* @__PURE__ */ new Map();
+    this.failedServers = /* @__PURE__ */ new Set();
+    this.mainWindow = null;
+  }
+  setWindow(window) {
+    this.mainWindow = window;
+  }
+  async startLanguageServer(language, rootPath) {
+    const key = `${language}:${rootPath}`;
+    if (this.clients.has(key)) {
+      return true;
+    }
+    if (this.failedServers.has(key)) {
+      return false;
+    }
+    const serverCommand = this.getLanguageServerCommand(language, rootPath);
+    if (!serverCommand) {
+      console.log(`[LSP] No language server available for ${language}`);
+      this.failedServers.add(key);
+      return false;
+    }
+    try {
+      const { command, args, options } = serverCommand;
+      console.log(`[LSP] Starting ${language} server: ${command} ${args.join(" ")}`);
+      const process2 = child_process.spawn(command, args, {
+        ...options,
+        cwd: rootPath,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      const connection = node.createMessageConnection(
+        new node.StreamMessageReader(process2.stdout),
+        new node.StreamMessageWriter(process2.stdin)
+      );
+      connection.listen();
+      process2.stderr?.on("data", (data) => {
+        console.log(`[LSP ${language}]`, data.toString());
+      });
+      process2.on("exit", (code) => {
+        console.log(`[LSP ${language}] Server exited with code ${code}`);
+        this.clients.delete(key);
+      });
+      const initResult = await connection.sendRequest("initialize", {
+        processId: process2.pid,
+        rootUri: `file://${rootPath}`,
+        capabilities: {
+          textDocument: {
+            synchronization: {
+              dynamicRegistration: false,
+              willSave: true,
+              willSaveWaitUntil: true,
+              didSave: true
+            },
+            completion: {
+              dynamicRegistration: false,
+              completionItem: {
+                snippetSupport: true,
+                commitCharactersSupport: true,
+                documentationFormat: ["markdown", "plaintext"],
+                deprecatedSupport: true,
+                preselectSupport: true
+              }
+            },
+            hover: {
+              dynamicRegistration: false,
+              contentFormat: ["markdown", "plaintext"]
+            },
+            definition: {
+              dynamicRegistration: false,
+              linkSupport: true
+            },
+            documentSymbol: {
+              dynamicRegistration: false,
+              hierarchicalDocumentSymbolSupport: true
+            },
+            codeAction: {
+              dynamicRegistration: false,
+              codeActionLiteralSupport: {
+                codeActionKind: {
+                  valueSet: ["", "quickfix", "refactor", "source"]
+                }
+              }
+            },
+            formatting: {
+              dynamicRegistration: false
+            },
+            rename: {
+              dynamicRegistration: false,
+              prepareSupport: true
+            }
+          },
+          workspace: {
+            applyEdit: true,
+            workspaceEdit: {
+              documentChanges: true
+            }
+          }
+        },
+        workspaceFolders: [{
+          uri: `file://${rootPath}`,
+          name: path__namespace.basename(rootPath)
+        }]
+      });
+      await connection.sendNotification("initialized", {});
+      const client = {
+        process: process2,
+        connection,
+        rootPath,
+        language,
+        capabilities: initResult?.capabilities || {}
+      };
+      this.clients.set(key, client);
+      console.log(`[LSP] ${language} server initialized successfully`);
+      return true;
+    } catch (error) {
+      console.error(`[LSP] Failed to start ${language} server:`, error);
+      this.failedServers.add(key);
+      return false;
+    }
+  }
+  getLanguageServerCommand(language, rootPath) {
+    const isWin = process.platform === "win32";
+    const nodeModulesPath = path__namespace.join(rootPath, "node_modules");
+    switch (language) {
+      case "typescript":
+      case "javascript":
+        const tlsPath = path__namespace.join(nodeModulesPath, ".bin", isWin ? "typescript-language-server.cmd" : "typescript-language-server");
+        if (fs__namespace.existsSync(tlsPath)) {
+          return {
+            command: tlsPath,
+            args: ["--stdio"],
+            options: { shell: isWin }
+          };
+        }
+        return {
+          command: isWin ? "npx.cmd" : "npx",
+          args: ["-y", "typescript-language-server", "--stdio"],
+          options: { shell: isWin }
+        };
+      case "python":
+        return {
+          command: isWin ? "pylsp.cmd" : "pylsp",
+          args: [],
+          options: { shell: isWin }
+        };
+      case "rust":
+        return {
+          command: "rust-analyzer",
+          args: [],
+          options: {}
+        };
+      case "go":
+        return {
+          command: "gopls",
+          args: [],
+          options: {}
+        };
+      default:
+        return null;
+    }
+  }
+  async getDefinition(filePath, line, character) {
+    const language = this.detectLanguage(filePath);
+    const rootPath = this.findProjectRoot(filePath, language);
+    if (!rootPath) return null;
+    const key = `${language}:${rootPath}`;
+    let client = this.clients.get(key);
+    if (!client) {
+      const started = await this.startLanguageServer(language, rootPath);
+      if (!started) return null;
+      client = this.clients.get(key);
+    }
+    if (!client) return null;
+    try {
+      const content = fs__namespace.readFileSync(filePath, "utf-8");
+      await client.connection.sendNotification("textDocument/didOpen", {
+        textDocument: {
+          uri: `file://${filePath}`,
+          languageId: language,
+          version: 1,
+          text: content
+        }
+      });
+      const result = await client.connection.sendRequest("textDocument/definition", {
+        textDocument: {
+          uri: `file://${filePath}`
+        },
+        position: {
+          line,
+          character
+        }
+      });
+      return result;
+    } catch (error) {
+      console.error("[LSP] Definition request failed:", error);
+      return null;
+    }
+  }
+  async getHover(filePath, line, character) {
+    const language = this.detectLanguage(filePath);
+    const rootPath = this.findProjectRoot(filePath, language);
+    if (!rootPath) return null;
+    const key = `${language}:${rootPath}`;
+    let client = this.clients.get(key);
+    if (!client) {
+      const started = await this.startLanguageServer(language, rootPath);
+      if (!started) return null;
+      client = this.clients.get(key);
+    }
+    if (!client) return null;
+    try {
+      const content = fs__namespace.readFileSync(filePath, "utf-8");
+      await client.connection.sendNotification("textDocument/didOpen", {
+        textDocument: {
+          uri: `file://${filePath}`,
+          languageId: language,
+          version: 1,
+          text: content
+        }
+      });
+      const result = await client.connection.sendRequest("textDocument/hover", {
+        textDocument: {
+          uri: `file://${filePath}`
+        },
+        position: {
+          line,
+          character
+        }
+      });
+      return result;
+    } catch (error) {
+      console.error("[LSP] Hover request failed:", error);
+      return null;
+    }
+  }
+  async getDocumentSymbols(filePath) {
+    const language = this.detectLanguage(filePath);
+    const rootPath = this.findProjectRoot(filePath, language);
+    if (!rootPath) return null;
+    const key = `${language}:${rootPath}`;
+    let client = this.clients.get(key);
+    if (!client) {
+      const started = await this.startLanguageServer(language, rootPath);
+      if (!started) return null;
+      client = this.clients.get(key);
+    }
+    if (!client) return null;
+    try {
+      const content = fs__namespace.readFileSync(filePath, "utf-8");
+      await client.connection.sendNotification("textDocument/didOpen", {
+        textDocument: {
+          uri: `file://${filePath}`,
+          languageId: language,
+          version: 1,
+          text: content
+        }
+      });
+      const result = await client.connection.sendRequest("textDocument/documentSymbol", {
+        textDocument: {
+          uri: `file://${filePath}`
+        }
+      });
+      return result;
+    } catch (error) {
+      console.error("[LSP] Document symbols request failed:", error);
+      return null;
+    }
+  }
+  detectLanguage(filePath) {
+    const ext = path__namespace.extname(filePath).toLowerCase();
+    switch (ext) {
+      case ".ts":
+      case ".tsx":
+        return "typescript";
+      case ".js":
+      case ".jsx":
+        return "javascript";
+      case ".py":
+        return "python";
+      case ".rs":
+        return "rust";
+      case ".go":
+        return "go";
+      default:
+        return "plaintext";
+    }
+  }
+  findProjectRoot(filePath, language) {
+    let currentDir = path__namespace.dirname(filePath);
+    while (currentDir !== path__namespace.dirname(currentDir)) {
+      switch (language) {
+        case "typescript":
+        case "javascript":
+          if (fs__namespace.existsSync(path__namespace.join(currentDir, "tsconfig.json")) || fs__namespace.existsSync(path__namespace.join(currentDir, "package.json"))) {
+            return currentDir;
+          }
+          break;
+        case "python":
+          if (fs__namespace.existsSync(path__namespace.join(currentDir, "requirements.txt")) || fs__namespace.existsSync(path__namespace.join(currentDir, "setup.py")) || fs__namespace.existsSync(path__namespace.join(currentDir, "pyproject.toml"))) {
+            return currentDir;
+          }
+          break;
+        case "rust":
+          if (fs__namespace.existsSync(path__namespace.join(currentDir, "Cargo.toml"))) {
+            return currentDir;
+          }
+          break;
+        case "go":
+          if (fs__namespace.existsSync(path__namespace.join(currentDir, "go.mod"))) {
+            return currentDir;
+          }
+          break;
+      }
+      if (fs__namespace.existsSync(path__namespace.join(currentDir, ".git"))) {
+        return currentDir;
+      }
+      currentDir = path__namespace.dirname(currentDir);
+    }
+    return path__namespace.dirname(filePath);
+  }
+  stopAll() {
+    for (const [key, client] of this.clients) {
+      try {
+        client.connection.sendNotification("exit");
+        client.process.kill();
+      } catch (error) {
+        console.error(`[LSP] Error stopping ${key}:`, error);
+      }
+    }
+    this.clients.clear();
+  }
+}
+const execAsync$1 = util.promisify(child_process.exec);
+class GitService {
+  async execGit(args, cwd) {
+    try {
+      return await execAsync$1(`git ${args}`, { cwd });
+    } catch (error) {
+      return { stdout: error.stdout || "", stderr: error.stderr || "" };
+    }
+  }
+  async isGitRepository(projectPath) {
+    if (!projectPath || !fs.existsSync(projectPath)) return false;
+    try {
+      await execAsync$1("git rev-parse --git-dir", { cwd: projectPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async getStatus(projectPath) {
+    if (!await this.isGitRepository(projectPath)) return [];
+    const { stdout } = await this.execGit("status --porcelain -z", projectPath);
+    const statuses = [];
+    const entries = stdout.split("\0");
+    let i = 0;
+    while (i < entries.length) {
+      const entry = entries[i];
+      if (!entry || entry.length < 3) {
+        i++;
+        continue;
+      }
+      const x = entry[0];
+      const y = entry[1];
+      const filePath = entry.substring(3);
+      let status;
+      if (x === "?" && y === "?") {
+        status = "untracked";
+      } else if (x === "A" || x !== " " && y === "A") {
+        status = "added";
+      } else if (x === "D" || y === "D") {
+        status = "deleted";
+      } else if (x === "M" || x === "R" || x === "C") {
+        status = "staged";
+      } else if (y === "M") {
+        status = "modified";
+      } else if (x === "R" || y === "R") {
+        status = "renamed";
+        i++;
+        const originalPath = entries[i];
+        statuses.push({ path: filePath, status, originalPath });
+        i++;
+        continue;
+      } else if (x === "U" || y === "U" || x === "A" && y === "A" || x === "D" && y === "D") {
+        status = "conflict";
+      } else {
+        status = "modified";
+      }
+      statuses.push({ path: path.join(projectPath, filePath), status });
+      i++;
+    }
+    return statuses;
+  }
+  async getBranches(projectPath) {
+    if (!await this.isGitRepository(projectPath)) return [];
+    const { stdout } = await this.execGit('branch -a --format="%(refname:short)|%(HEAD)"', projectPath);
+    return stdout.split("\n").filter((line) => line.trim()).map((line) => {
+      const [name, head] = line.split("|");
+      return {
+        name: name.trim(),
+        current: head === "*",
+        remote: name.startsWith("remotes/") ? name.replace("remotes/", "") : void 0
+      };
+    });
+  }
+  async getCurrentBranch(projectPath) {
+    if (!await this.isGitRepository(projectPath)) return null;
+    try {
+      const { stdout } = await execAsync$1("git branch --show-current", { cwd: projectPath });
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+  async getCommits(projectPath, count = 20) {
+    if (!await this.isGitRepository(projectPath)) return [];
+    const format = "%H|%h|%s|%an|%ai|%ar";
+    const { stdout } = await this.execGit(
+      `log -${count} --format="${format}"`,
+      projectPath
+    );
+    return stdout.split("\n").filter((line) => line.trim()).map((line) => {
+      const [hash, shortHash, message, author, date, relativeDate] = line.split("|");
+      return {
+        hash,
+        shortHash,
+        message,
+        author,
+        date,
+        relativeDate
+      };
+    });
+  }
+  async getDiff(projectPath, filePath) {
+    if (!await this.isGitRepository(projectPath)) return "";
+    const args = filePath ? `diff -- "${filePath}"` : "diff";
+    const { stdout } = await this.execGit(args, projectPath);
+    return stdout;
+  }
+  async getStagedDiff(projectPath, filePath) {
+    if (!await this.isGitRepository(projectPath)) return "";
+    const args = filePath ? `diff --staged -- "${filePath}"` : "diff --staged";
+    const { stdout } = await this.execGit(args, projectPath);
+    return stdout;
+  }
+  async stageFile(projectPath, filePath) {
+    if (!await this.isGitRepository(projectPath)) return false;
+    try {
+      const relativePath = filePath.replace(projectPath, "").replace(/^[\\/]/, "");
+      await execAsync$1(`git add "${relativePath}"`, { cwd: projectPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async unstageFile(projectPath, filePath) {
+    if (!await this.isGitRepository(projectPath)) return false;
+    try {
+      const relativePath = filePath.replace(projectPath, "").replace(/^[\\/]/, "");
+      await execAsync$1(`git reset HEAD "${relativePath}"`, { cwd: projectPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async discardChanges(projectPath, filePath) {
+    if (!await this.isGitRepository(projectPath)) return false;
+    try {
+      const relativePath = filePath.replace(projectPath, "").replace(/^[\\/]/, "");
+      await execAsync$1(`git checkout -- "${relativePath}"`, { cwd: projectPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async commit(projectPath, message) {
+    if (!await this.isGitRepository(projectPath)) {
+      return { success: false, error: "Not a git repository" };
+    }
+    try {
+      const escapedMessage = message.replace(/"/g, '\\"');
+      await execAsync$1(`git commit -m "${escapedMessage}"`, { cwd: projectPath });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.stderr || error.message };
+    }
+  }
+  async createBranch(projectPath, branchName, checkout = false) {
+    if (!await this.isGitRepository(projectPath)) return false;
+    try {
+      const args = checkout ? `-b "${branchName}"` : `"${branchName}"`;
+      await execAsync$1(`git branch ${args}`, { cwd: projectPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async checkoutBranch(projectPath, branchName) {
+    if (!await this.isGitRepository(projectPath)) return false;
+    try {
+      await execAsync$1(`git checkout "${branchName}"`, { cwd: projectPath });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async pull(projectPath) {
+    if (!await this.isGitRepository(projectPath)) {
+      return { success: false, error: "Not a git repository" };
+    }
+    try {
+      const { stdout, stderr } = await execAsync$1("git pull", { cwd: projectPath });
+      return { success: true, output: stdout || stderr };
+    } catch (error) {
+      return { success: false, error: error.stderr || error.message };
+    }
+  }
+  async push(projectPath) {
+    if (!await this.isGitRepository(projectPath)) {
+      return { success: false, error: "Not a git repository" };
+    }
+    try {
+      const { stdout, stderr } = await execAsync$1("git push", { cwd: projectPath });
+      return { success: true, output: stdout || stderr };
+    } catch (error) {
+      return { success: false, error: error.stderr || error.message };
+    }
+  }
+  async getRemoteUrl(projectPath) {
+    if (!await this.isGitRepository(projectPath)) return null;
+    try {
+      const { stdout } = await execAsync$1("git remote get-url origin", { cwd: projectPath });
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+}
+const execAsync = util.promisify(child_process.exec);
+class FormatService {
+  async hasPrettier(projectPath) {
+    const prettierPath = path.join(projectPath, "node_modules", ".bin", process.platform === "win32" ? "prettier.cmd" : "prettier");
+    return fs.existsSync(prettierPath);
+  }
+  async hasESLint(projectPath) {
+    const eslintPath = path.join(projectPath, "node_modules", ".bin", process.platform === "win32" ? "eslint.cmd" : "eslint");
+    return fs.existsSync(eslintPath);
+  }
+  async formatDocument(filePath, projectPath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const supportedExts = [".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".css", ".scss", ".less", ".html", ".yaml", ".yml"];
+    if (!supportedExts.includes(ext)) {
+      return { success: false, error: "File type not supported for formatting" };
+    }
+    if (await this.hasPrettier(projectPath)) {
+      return this.formatWithPrettier(filePath, projectPath);
+    }
+    try {
+      return this.formatWithNpxPrettier(filePath);
+    } catch (error) {
+      return { success: false, error: "Prettier not available. Install it with: npm install --save-dev prettier" };
+    }
+  }
+  async formatWithPrettier(filePath, projectPath) {
+    const isWin = process.platform === "win32";
+    const prettierCmd = path.join(projectPath, "node_modules", ".bin", isWin ? "prettier.cmd" : "prettier");
+    try {
+      const { stdout, stderr } = await execAsync(
+        `"${prettierCmd}" --write "${filePath}"`,
+        { cwd: projectPath }
+      );
+      const fs2 = await import("fs");
+      const content = fs2.readFileSync(filePath, "utf-8");
+      return { success: true, content };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.stderr || error.message || "Prettier formatting failed"
+      };
+    }
+  }
+  async formatWithNpxPrettier(filePath) {
+    const isWin = process.platform === "win32";
+    try {
+      const { stdout, stderr } = await execAsync(
+        `${isWin ? "npx.cmd" : "npx"} -y prettier --write "${filePath}"`,
+        { cwd: process.cwd() }
+      );
+      const fs2 = await import("fs");
+      const content = fs2.readFileSync(filePath, "utf-8");
+      return { success: true, content };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.stderr || error.message || "Prettier formatting failed"
+      };
+    }
+  }
+  async checkFormatting(filePath, projectPath) {
+    if (!await this.hasPrettier(projectPath)) {
+      return { formatted: true };
+    }
+    const isWin = process.platform === "win32";
+    const prettierCmd = path.join(projectPath, "node_modules", ".bin", isWin ? "prettier.cmd" : "prettier");
+    try {
+      await execAsync(
+        `"${prettierCmd}" --check "${filePath}"`,
+        { cwd: projectPath }
+      );
+      return { formatted: true };
+    } catch (error) {
+      if (error.code === 1) {
+        return { formatted: false };
+      }
+      return { formatted: true, error: error.stderr || error.message };
+    }
+  }
+  async getPrettierConfig(projectPath) {
+    const configFiles = [
+      ".prettierrc",
+      ".prettierrc.json",
+      ".prettierrc.yml",
+      ".prettierrc.yaml",
+      ".prettierrc.js",
+      "prettier.config.js",
+      ".prettierrc.mjs",
+      "prettier.config.mjs"
+    ];
+    const fs$1 = await import("fs");
+    for (const configFile of configFiles) {
+      const configPath = path.join(projectPath, configFile);
+      if (fs.existsSync(configPath)) {
+        try {
+          if (configFile.endsWith(".js") || configFile.endsWith(".mjs")) {
+            return { exists: true, path: configPath };
+          } else {
+            const content = fs$1.readFileSync(configPath, "utf-8");
+            if (configFile.endsWith(".json")) {
+              return JSON.parse(content);
+            } else if (configFile.endsWith(".yml") || configFile.endsWith(".yaml")) {
+              const config = {};
+              content.split("\n").forEach((line) => {
+                const match = line.match(/^(\w+):\s*(.+)$/);
+                if (match) {
+                  const value = match[2].trim();
+                  config[match[1]] = value === "true" ? true : value === "false" ? false : !isNaN(Number(value)) ? Number(value) : value;
+                }
+              });
+              return config;
+            }
+          }
+        } catch (e) {
+        }
+      }
+    }
+    const packageJsonPath = path.join(projectPath, "package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      try {
+        const content = fs$1.readFileSync(packageJsonPath, "utf-8");
+        const pkg = JSON.parse(content);
+        if (pkg.prettier) {
+          return pkg.prettier;
+        }
+      } catch (e) {
+      }
+    }
+    return null;
+  }
+}
+class DebugService extends events.EventEmitter {
+  constructor() {
+    super(...arguments);
+    this.sessions = /* @__PURE__ */ new Map();
+    this.sessionIdCounter = 0;
+  }
+  async startNodeDebug(scriptPath, cwd, args = []) {
+    const sessionId = `debug-${++this.sessionIdCounter}`;
+    return new Promise((resolve) => {
+      try {
+        const proc = child_process.spawn("node", ["--inspect-brk=9229", scriptPath, ...args], {
+          cwd,
+          stdio: ["pipe", "pipe", "pipe"]
+        });
+        const session = {
+          id: sessionId,
+          process: proc,
+          type: "node",
+          breakpoints: /* @__PURE__ */ new Map(),
+          isPaused: true
+        };
+        this.sessions.set(sessionId, session);
+        proc.on("error", (error) => {
+          console.error(`[Debug] Node process error:`, error);
+          this.emit("output", { sessionId, output: `Error: ${error.message}
+`, type: "stderr" });
+          this.sessions.delete(sessionId);
+          resolve({ sessionId: "", error: error.message });
+        });
+        proc.stdout?.on("data", (data) => {
+          this.emit("output", { sessionId, output: data.toString(), type: "stdout" });
+        });
+        proc.stderr?.on("data", (data) => {
+          this.emit("output", { sessionId, output: data.toString(), type: "stderr" });
+        });
+        proc.on("exit", (code) => {
+          this.emit("terminated", { sessionId, code });
+          this.sessions.delete(sessionId);
+        });
+        setTimeout(() => {
+          if (this.sessions.has(sessionId)) {
+            this.emit("started", { sessionId, type: "node" });
+            resolve({ sessionId });
+          }
+        }, 100);
+      } catch (error) {
+        console.error(`[Debug] Failed to start Node debug:`, error);
+        resolve({ sessionId: "", error: error.message });
+      }
+    });
+  }
+  async startPythonDebug(scriptPath, cwd, args = []) {
+    const sessionId = `debug-${++this.sessionIdCounter}`;
+    return new Promise((resolve) => {
+      try {
+        const proc = child_process.spawn("python", ["-m", "debugpy", "--listen", "5678", "--wait-for-client", scriptPath, ...args], {
+          cwd,
+          stdio: ["pipe", "pipe", "pipe"]
+        });
+        const session = {
+          id: sessionId,
+          process: proc,
+          type: "python",
+          breakpoints: /* @__PURE__ */ new Map(),
+          isPaused: true
+        };
+        this.sessions.set(sessionId, session);
+        proc.on("error", (error) => {
+          console.error(`[Debug] Python process error:`, error);
+          this.emit("output", { sessionId, output: `Error: ${error.message}
+`, type: "stderr" });
+          this.sessions.delete(sessionId);
+          resolve({ sessionId: "", error: error.message });
+        });
+        process.stdout?.on("data", (data) => {
+          this.emit("output", { sessionId, output: data.toString(), type: "stdout" });
+        });
+        process.stderr?.on("data", (data) => {
+          this.emit("output", { sessionId, output: data.toString(), type: "stderr" });
+        });
+        process.on("exit", (code) => {
+          this.emit("terminated", { sessionId, code });
+          this.sessions.delete(sessionId);
+        });
+        setTimeout(() => {
+          if (this.sessions.has(sessionId)) {
+            this.emit("started", { sessionId, type: "python" });
+            resolve({ sessionId });
+          }
+        }, 100);
+      } catch (error) {
+        console.error(`[Debug] Failed to start Python debug:`, error);
+        resolve({ sessionId: "", error: error.message });
+      }
+    });
+  }
+  stopDebug(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    session.process.kill("SIGTERM");
+    this.sessions.delete(sessionId);
+    this.emit("stopped", { sessionId });
+    return true;
+  }
+  pauseDebug(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    if (session.type === "node") {
+      session.process.kill("SIGUSR1");
+      session.isPaused = true;
+      this.emit("paused", { sessionId });
+      return true;
+    }
+    return false;
+  }
+  continueDebug(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    session.isPaused = false;
+    this.emit("continued", { sessionId });
+    return true;
+  }
+  stepOver(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.isPaused) return false;
+    this.emit("stepOver", { sessionId });
+    return true;
+  }
+  stepInto(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.isPaused) return false;
+    this.emit("stepInto", { sessionId });
+    return true;
+  }
+  stepOut(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.isPaused) return false;
+    this.emit("stepOut", { sessionId });
+    return true;
+  }
+  setBreakpoint(sessionId, file, line, condition) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const breakpoints = session.breakpoints.get(file) || [];
+    if (!breakpoints.includes(line)) {
+      breakpoints.push(line);
+      session.breakpoints.set(file, breakpoints);
+    }
+    this.emit("breakpointSet", { sessionId, file, line, condition });
+    return true;
+  }
+  removeBreakpoint(sessionId, file, line) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const breakpoints = session.breakpoints.get(file) || [];
+    const index = breakpoints.indexOf(line);
+    if (index > -1) {
+      breakpoints.splice(index, 1);
+      session.breakpoints.set(file, breakpoints);
+    }
+    this.emit("breakpointRemoved", { sessionId, file, line });
+    return true;
+  }
+  getBreakpoints(sessionId, file) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    const breakpoints = [];
+    if (file) {
+      const lines = session.breakpoints.get(file) || [];
+      lines.forEach((line) => breakpoints.push({ file, line }));
+    } else {
+      session.breakpoints.forEach((lines, filePath) => {
+        lines.forEach((line) => breakpoints.push({ file: filePath, line }));
+      });
+    }
+    return breakpoints;
+  }
+  getActiveSessions() {
+    return Array.from(this.sessions.keys());
+  }
+  isSessionActive(sessionId) {
+    return this.sessions.has(sessionId);
+  }
+  getSessionInfo(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return { type: session.type, isPaused: session.isPaused };
+  }
+}
 let mainWindow = null;
 let fileService;
 let aiService;
 let modelDownloader;
 let diagnosticService;
+let lspService;
+let gitService;
+let formatService;
+let debugService;
 const SETTINGS_PATH = path.join(electron.app.getPath("userData"), "settings.json");
 function getDefaultSettings() {
   return {
@@ -1351,6 +2256,10 @@ function setupIPC() {
   aiService = new AIService();
   modelDownloader = new ModelDownloader();
   diagnosticService = new DiagnosticService();
+  lspService = new LSPService();
+  gitService = new GitService();
+  formatService = new FormatService();
+  debugService = new DebugService();
   electron.ipcMain.handle("window:minimize", () => mainWindow?.minimize());
   electron.ipcMain.handle("window:maximize", () => {
     if (mainWindow?.isMaximized()) {
@@ -1691,8 +2600,127 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
     const results = await vectorStore.search(embedding, 5);
     return results;
   });
+  electron.ipcMain.handle("lsp:definition", async (_event, filePath, line, character) => {
+    return lspService.getDefinition(filePath, line, character);
+  });
+  electron.ipcMain.handle("lsp:hover", async (_event, filePath, line, character) => {
+    return lspService.getHover(filePath, line, character);
+  });
+  electron.ipcMain.handle("lsp:documentSymbols", async (_event, filePath) => {
+    return lspService.getDocumentSymbols(filePath);
+  });
+  electron.ipcMain.handle("git:isRepo", async (_event, projectPath) => {
+    return gitService.isGitRepository(projectPath);
+  });
+  electron.ipcMain.handle("git:status", async (_event, projectPath) => {
+    return gitService.getStatus(projectPath);
+  });
+  electron.ipcMain.handle("git:branches", async (_event, projectPath) => {
+    return gitService.getBranches(projectPath);
+  });
+  electron.ipcMain.handle("git:currentBranch", async (_event, projectPath) => {
+    return gitService.getCurrentBranch(projectPath);
+  });
+  electron.ipcMain.handle("git:commits", async (_event, projectPath, count) => {
+    return gitService.getCommits(projectPath, count);
+  });
+  electron.ipcMain.handle("git:diff", async (_event, projectPath, filePath) => {
+    return gitService.getDiff(projectPath, filePath);
+  });
+  electron.ipcMain.handle("git:stage", async (_event, projectPath, filePath) => {
+    return gitService.stageFile(projectPath, filePath);
+  });
+  electron.ipcMain.handle("git:unstage", async (_event, projectPath, filePath) => {
+    return gitService.unstageFile(projectPath, filePath);
+  });
+  electron.ipcMain.handle("git:discard", async (_event, projectPath, filePath) => {
+    return gitService.discardChanges(projectPath, filePath);
+  });
+  electron.ipcMain.handle("git:commit", async (_event, projectPath, message) => {
+    return gitService.commit(projectPath, message);
+  });
+  electron.ipcMain.handle("git:createBranch", async (_event, projectPath, branchName, checkout) => {
+    return gitService.createBranch(projectPath, branchName, checkout);
+  });
+  electron.ipcMain.handle("git:checkout", async (_event, projectPath, branchName) => {
+    return gitService.checkoutBranch(projectPath, branchName);
+  });
+  electron.ipcMain.handle("git:pull", async (_event, projectPath) => {
+    return gitService.pull(projectPath);
+  });
+  electron.ipcMain.handle("git:push", async (_event, projectPath) => {
+    return gitService.push(projectPath);
+  });
+  electron.ipcMain.handle("format:document", async (_event, filePath, projectPath) => {
+    return formatService.formatDocument(filePath, projectPath);
+  });
+  electron.ipcMain.handle("format:check", async (_event, filePath, projectPath) => {
+    return formatService.checkFormatting(filePath, projectPath);
+  });
+  electron.ipcMain.handle("format:config", async (_event, projectPath) => {
+    return formatService.getPrettierConfig(projectPath);
+  });
+  electron.ipcMain.handle("debug:startNode", async (_event, scriptPath, cwd, args) => {
+    return debugService.startNodeDebug(scriptPath, cwd, args);
+  });
+  electron.ipcMain.handle("debug:startPython", async (_event, scriptPath, cwd, args) => {
+    return debugService.startPythonDebug(scriptPath, cwd, args);
+  });
+  electron.ipcMain.handle("debug:stop", async (_event, sessionId) => {
+    return debugService.stopDebug(sessionId);
+  });
+  electron.ipcMain.handle("debug:pause", async (_event, sessionId) => {
+    return debugService.pauseDebug(sessionId);
+  });
+  electron.ipcMain.handle("debug:continue", async (_event, sessionId) => {
+    return debugService.continueDebug(sessionId);
+  });
+  electron.ipcMain.handle("debug:stepOver", async (_event, sessionId) => {
+    return debugService.stepOver(sessionId);
+  });
+  electron.ipcMain.handle("debug:stepInto", async (_event, sessionId) => {
+    return debugService.stepInto(sessionId);
+  });
+  electron.ipcMain.handle("debug:stepOut", async (_event, sessionId) => {
+    return debugService.stepOut(sessionId);
+  });
+  electron.ipcMain.handle("debug:setBreakpoint", async (_event, sessionId, file, line, condition) => {
+    return debugService.setBreakpoint(sessionId, file, line, condition);
+  });
+  electron.ipcMain.handle("debug:removeBreakpoint", async (_event, sessionId, file, line) => {
+    return debugService.removeBreakpoint(sessionId, file, line);
+  });
+  electron.ipcMain.handle("debug:getBreakpoints", async (_event, sessionId, file) => {
+    return debugService.getBreakpoints(sessionId, file);
+  });
+  electron.ipcMain.handle("debug:getActiveSessions", async () => {
+    return debugService.getActiveSessions();
+  });
+  electron.ipcMain.handle("debug:getSessionInfo", async (_event, sessionId) => {
+    return debugService.getSessionInfo(sessionId);
+  });
+  debugService.on("output", (data) => {
+    mainWindow?.webContents.send("debug:output", data);
+  });
+  debugService.on("started", (data) => {
+    mainWindow?.webContents.send("debug:started", data);
+  });
+  debugService.on("stopped", (data) => {
+    mainWindow?.webContents.send("debug:stopped", data);
+  });
+  debugService.on("terminated", (data) => {
+    mainWindow?.webContents.send("debug:terminated", data);
+  });
+  debugService.on("paused", (data) => {
+    mainWindow?.webContents.send("debug:paused", data);
+  });
+  debugService.on("continued", (data) => {
+    mainWindow?.webContents.send("debug:continued", data);
+  });
 }
 electron.app.whenReady().then(() => {
+  electron.app.commandLine.appendSwitch("log-level", "3");
+  electron.app.commandLine.appendSwitch("ignore-certificate-errors");
   setupIPC();
   createWindow();
   electron.app.on("activate", () => {

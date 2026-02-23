@@ -611,7 +611,7 @@ export default function ChatPanel() {
                         <div className="chat-empty-icon">
                             <Sparkles size={32} strokeWidth={1.2} />
                         </div>
-                        <h3>BitNet AI</h3>
+                        <h3>QuietlyCode AI</h3>
                         <p>Ask me anything about your code, or select code and use the quick actions above.</p>
                     </div>
                 )}

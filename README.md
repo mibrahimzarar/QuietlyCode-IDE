@@ -1,4 +1,4 @@
-# BitNet IDE
+# QuietlyCode IDE
 
 A calm, local, private AI pair-programmer. No cloud. No telemetry. No distractions.
 
@@ -91,8 +91,6 @@ src/
 - **Privacy first** — All code stays on your machine
 - **No telemetry** — Zero tracking, zero external calls
 - **Minimal & calm** — Professional UI without distractions
-- **CPU-friendly** — Target: 16GB RAM laptops, CPU-only inference
+- **CPU-friendly** — Target: 16GB RAM laptops (Min), CPU-only inference
 
-## License
 
-MIT

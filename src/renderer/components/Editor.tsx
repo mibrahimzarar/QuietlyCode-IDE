@@ -4,10 +4,17 @@ import { useApp } from '../store/appStore'
 import { PROMPTS } from '../prompts'
 import { Code2 } from 'lucide-react'
 import EditPalette from './EditPalette'
+import FindWidget from './FindWidget'
+import HoverTooltip from './HoverTooltip'
 
-export default function Editor() {
+interface EditorProps {
+    isSecondary?: boolean
+}
+
+export default function Editor({ isSecondary = false }: EditorProps) {
     const { state, dispatch } = useApp()
     const editorRef = useRef<any>(null)
+    const monacoRef = useRef<any>(null)
     const [editPalettePos, setEditPalettePos] = useState<{
         x: number,
         y: number,
@@ -16,10 +23,13 @@ export default function Editor() {
     } | null>(null)
     const [isGeneratingEdit, setIsGeneratingEdit] = useState(false)
 
-    const activeFile = state.openFiles.find(f => f.path === state.activeFilePath)
+    const activeFile = isSecondary 
+        ? state.openFiles.find(f => f.path === state.splitEditor.secondaryFilePath)
+        : state.openFiles.find(f => f.path === state.activeFilePath)
 
     const handleMount: OnMount = (editor, monaco) => {
         editorRef.current = editor
+        monacoRef.current = monaco
 
         // Track selection changes
         editor.onDidChangeCursorSelection((e) => {
@@ -102,6 +112,119 @@ export default function Editor() {
                             }
                         })
                     }
+                }
+            }
+        })
+
+        // Go to Line
+        editor.addAction({
+            id: 'go-to-line',
+            label: 'Go to Line',
+            keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG],
+            contextMenuGroupId: 'navigation',
+            contextMenuOrder: 2,
+            run: () => {
+                const lineNumber = prompt('Go to line:')
+                if (lineNumber) {
+                    const line = parseInt(lineNumber, 10)
+                    if (!isNaN(line) && line > 0) {
+                        editor.setPosition({ lineNumber: line, column: 1 })
+                        editor.revealLineInCenter(line)
+                    }
+                }
+            }
+        })
+
+        // Format Document
+        editor.addAction({
+            id: 'format-document',
+            label: 'Format Document',
+            keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+            contextMenuGroupId: '1_modification',
+            contextMenuOrder: 1.5,
+            run: async () => {
+                if (!activeFile || !state.projectPath) return
+                
+                const result = await window.electronAPI.formatDocument(activeFile.path, state.projectPath)
+                if (result.success && result.content !== undefined) {
+                    // Update editor content
+                    const model = editor.getModel()
+                    if (model) {
+                        model.setValue(result.content)
+                        dispatch({ type: 'UPDATE_FILE_CONTENT', path: activeFile.path, content: result.content })
+                    }
+                } else if (result.error) {
+                    console.error('Format failed:', result.error)
+                    // Optionally show a notification
+                }
+            }
+        })
+
+        // Go to Definition
+        editor.addAction({
+            id: 'go-to-definition',
+            label: 'Go to Definition',
+            keybindings: [monaco.KeyCode.F12],
+            contextMenuGroupId: 'navigation',
+            contextMenuOrder: 1,
+            run: async () => {
+                const position = editor.getPosition()
+                if (!position || !activeFile) return
+                
+                try {
+                    const result = await window.electronAPI.getDefinition(
+                        activeFile.path,
+                        position.lineNumber - 1,
+                        position.column - 1
+                    )
+                    
+                    if (result) {
+                        const locations = Array.isArray(result) ? result : [result]
+                        if (locations.length > 0) {
+                            const loc = locations[0]
+                            const filePath = loc.uri.replace('file://', '')
+                            
+                            // Open the file if different
+                            if (filePath !== activeFile.path) {
+                                const fileResult = await window.electronAPI.readFile(filePath)
+                                if (fileResult.success && fileResult.content !== undefined) {
+                                    const name = filePath.split('\\').pop() || filePath
+                                    const ext = name.split('.').pop()?.toLowerCase() || ''
+                                    const langMap: Record<string, string> = {
+                                        ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+                                        py: 'python', rs: 'rust', go: 'go', java: 'java', cpp: 'cpp', c: 'c',
+                                        h: 'c', hpp: 'cpp', css: 'css', html: 'html', json: 'json', md: 'markdown',
+                                        yaml: 'yaml', yml: 'yaml', xml: 'xml', sh: 'shell', sql: 'sql',
+                                        rb: 'ruby', php: 'php', swift: 'swift', kt: 'kotlin', toml: 'toml'
+                                    }
+                                    dispatch({
+                                        type: 'OPEN_FILE',
+                                        file: {
+                                            path: filePath,
+                                            name,
+                                            content: fileResult.content,
+                                            language: langMap[ext] || 'plaintext',
+                                            isDirty: false
+                                        }
+                                    })
+                                }
+                            }
+                            
+                            // Navigate to position
+                            setTimeout(() => {
+                                editor.setPosition({
+                                    lineNumber: loc.range.start.line + 1,
+                                    column: loc.range.start.character + 1
+                                })
+                                editor.revealPositionInCenter({
+                                    lineNumber: loc.range.start.line + 1,
+                                    column: loc.range.start.character + 1
+                                })
+                            }, 100)
+                        }
+                    }
+                } catch (error) {
+                    console.log('Definition not available')
                 }
             }
         })
@@ -324,6 +447,18 @@ export default function Editor() {
 
     return (
         <div className="editor-container">
+            {editorRef.current && monacoRef.current && (
+                <>
+                    <FindWidget editor={editorRef.current} monaco={monacoRef.current} />
+                    {activeFile && (
+                        <HoverTooltip 
+                            editor={editorRef.current} 
+                            monaco={monacoRef.current} 
+                            filePath={activeFile.path}
+                        />
+                    )}
+                </>
+            )}
             <MonacoEditor
                 key={activeFile.path}
                 language={activeFile.language}

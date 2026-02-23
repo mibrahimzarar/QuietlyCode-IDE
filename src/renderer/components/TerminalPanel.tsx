@@ -75,25 +75,44 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
 
     // Handle Resize
     useEffect(() => {
-        const resizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(() => {
-                sessions.forEach(s => {
-                    if (s.fitAddon && s.instance) {
-                        try {
-                            s.fitAddon.fit()
-                            // Optional: Tell the local PTY backend about the new size
-                            window.electronAPI.resizeTerminal(s.id, s.instance.cols, s.instance.rows)
-                        } catch (e) { /* ignore */ }
-                    }
+        let resizeTimeout: NodeJS.Timeout | null = null
+        
+        const resizeObserver = new ResizeObserver((entries) => {
+            // Debounce resize events
+            if (resizeTimeout) clearTimeout(resizeTimeout)
+            resizeTimeout = setTimeout(() => {
+                requestAnimationFrame(() => {
+                    sessions.forEach(s => {
+                        if (s.fitAddon && s.instance && s.containerRef.current) {
+                            // Only resize if the container is visible
+                            const rect = s.containerRef.current.getBoundingClientRect()
+                            if (rect.width > 0 && rect.height > 0) {
+                                try {
+                                    s.fitAddon.fit()
+                                    // Tell the PTY backend about the new size
+                                    const cols = s.instance.cols
+                                    const rows = s.instance.rows
+                                    if (cols > 0 && rows > 0) {
+                                        window.electronAPI.resizeTerminal(s.id, cols, rows)
+                                    }
+                                } catch (e) { 
+                                    console.error('Resize error:', e)
+                                }
+                            }
+                        }
+                    })
                 })
-            })
+            }, 100)
         })
 
         if (terminalAreaRef.current) {
             resizeObserver.observe(terminalAreaRef.current)
         }
 
-        return () => resizeObserver.disconnect()
+        return () => {
+            resizeObserver.disconnect()
+            if (resizeTimeout) clearTimeout(resizeTimeout)
+        }
     }, [sessions])
 
     function createNewSession() {
@@ -116,6 +135,9 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
     async function initXterm(session: TerminalSession) {
         if (!session.containerRef.current) return
 
+        // Clear any existing content
+        session.containerRef.current.innerHTML = ''
+
         const term = new Terminal({
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
             fontSize: 13,
@@ -124,6 +146,10 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
             cursorStyle: 'bar',
             allowTransparency: true,
             convertEol: true,
+            scrollback: 10000,
+            smoothScrollDuration: 0,
+            fastScrollModifier: 'alt',
+            fastScrollSensitivity: 5,
             theme: {
                 background: '#1a1b2e', /* Consistent dark background */
                 foreground: '#eaeaf2',
@@ -150,7 +176,16 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
 
         const fitAddon = new FitAddon()
         term.loadAddon(fitAddon)
-        term.open(session.containerRef.current)
+        
+        // Create a container for xterm
+        const xtermContainer = document.createElement('div')
+        xtermContainer.style.width = '100%'
+        xtermContainer.style.height = '100%'
+        xtermContainer.style.position = 'relative'
+        xtermContainer.style.overflow = 'hidden'
+        session.containerRef.current.appendChild(xtermContainer)
+        
+        term.open(xtermContainer)
 
         // Force font antialiasing
         if (term.element) {
@@ -159,8 +194,18 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
             style.MozOsxFontSmoothing = 'grayscale'
         }
 
-        // Wait a tick for DOM to update
-        setTimeout(() => fitAddon.fit(), 10)
+        // Wait for DOM to update then fit
+        requestAnimationFrame(() => {
+            try {
+                fitAddon.fit()
+                // Resize the terminal PTY to match
+                if (term.cols && term.rows) {
+                    window.electronAPI.resizeTerminal(session.id, term.cols, term.rows)
+                }
+            } catch (e) {
+                console.error('Failed to fit terminal:', e)
+            }
+        })
 
         term.onData((data) => {
             if (data === '\r') {

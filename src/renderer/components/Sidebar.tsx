@@ -3,10 +3,12 @@ import { useApp, FileTreeNode } from '../store/appStore'
 import {
     FolderOpen, FolderClosed, FileText, ChevronRight, ChevronDown,
     FilePlus, FolderPlus, Search, Pencil, Trash2, Files, MessageSquare,
-    FileCode2, FileJson, FileType2, FileCog, FileImage, FileTerminal, FileSpreadsheet
+    FileCode2, FileJson, FileType2, FileCog, FileImage, FileTerminal, FileSpreadsheet,
+    GitBranch
 } from 'lucide-react'
+import SourceControlPanel from './SourceControlPanel'
 
-type SidebarTab = 'explorer' | 'search'
+type SidebarTab = 'explorer' | 'search' | 'git'
 
 export default function Sidebar() {
     const { state, dispatch } = useApp()
@@ -275,18 +277,29 @@ export default function Sidebar() {
                 <button
                     className={`sidebar-tab ${activeTab === 'explorer' ? 'active' : ''}`}
                     onClick={() => setActiveTab('explorer')}
+                    title="Explorer"
                 >
-                    <Files size={14} /> Explorer
+                    <Files size={14} /> <span>Explorer</span>
                 </button>
                 <button
                     className={`sidebar-tab ${activeTab === 'search' ? 'active' : ''}`}
                     onClick={() => setActiveTab('search')}
+                    title="Search"
                 >
-                    <Search size={14} /> Search
+                    <Search size={14} /> <span>Search</span>
+                </button>
+                <button
+                    className={`sidebar-tab ${activeTab === 'git' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('git')}
+                    title="Source Control"
+                >
+                    <GitBranch size={14} /> <span>Source Control</span>
                 </button>
             </div>
 
-            {activeTab === 'explorer' ? (
+            {activeTab === 'git' ? (
+                <SourceControlPanel />
+            ) : activeTab === 'explorer' ? (
                 <>
                     <div className="sidebar-header">
                         <h3>{state.projectPath ? state.projectPath.split('\\').pop() : 'Explorer'}</h3>

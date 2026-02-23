@@ -26,8 +26,8 @@ export default function TitleBar() {
     return (
         <div className="titlebar">
             <div className="titlebar-logo">
-                <Cpu size={16} strokeWidth={2} />
-                <span>BitNet IDE</span>
+                <img src="./assets/logo.jpg" alt="QuietlyCode" className="titlebar-logo-img" />
+                <span>QuietlyCode</span>
             </div>
 
             {/* IDE menu buttons - only show in IDE mode */}

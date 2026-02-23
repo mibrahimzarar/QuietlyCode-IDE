@@ -38,7 +38,7 @@ export default function StatusBar() {
                     </>
                 )}
                 <div className="status-item">
-                    <span>BitNet.cpp</span>
+                    <span>QuietlyCode</span>
                 </div>
             </div>
         </div>

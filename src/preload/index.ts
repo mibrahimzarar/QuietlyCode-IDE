@@ -110,6 +110,83 @@ const electronAPI = {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('rag:progress', listener)
         return () => ipcRenderer.removeListener('rag:progress', listener)
+    },
+
+    // LSP
+    getDefinition: (filePath: string, line: number, character: number) => 
+        ipcRenderer.invoke('lsp:definition', filePath, line, character),
+    getHover: (filePath: string, line: number, character: number) => 
+        ipcRenderer.invoke('lsp:hover', filePath, line, character),
+    getDocumentSymbols: (filePath: string) => 
+        ipcRenderer.invoke('lsp:documentSymbols', filePath),
+
+    // Git
+    isGitRepo: (projectPath: string) => ipcRenderer.invoke('git:isRepo', projectPath),
+    getGitStatus: (projectPath: string) => ipcRenderer.invoke('git:status', projectPath),
+    getGitBranches: (projectPath: string) => ipcRenderer.invoke('git:branches', projectPath),
+    getCurrentBranch: (projectPath: string) => ipcRenderer.invoke('git:currentBranch', projectPath),
+    getGitCommits: (projectPath: string, count?: number) => ipcRenderer.invoke('git:commits', projectPath, count || 20),
+    getGitDiff: (projectPath: string, filePath?: string) => ipcRenderer.invoke('git:diff', projectPath, filePath),
+    stageFile: (projectPath: string, filePath: string) => ipcRenderer.invoke('git:stage', projectPath, filePath),
+    unstageFile: (projectPath: string, filePath: string) => ipcRenderer.invoke('git:unstage', projectPath, filePath),
+    discardChanges: (projectPath: string, filePath: string) => ipcRenderer.invoke('git:discard', projectPath, filePath),
+    commitChanges: (projectPath: string, message: string) => ipcRenderer.invoke('git:commit', projectPath, message),
+    createBranch: (projectPath: string, branchName: string, checkout?: boolean) => 
+        ipcRenderer.invoke('git:createBranch', projectPath, branchName, checkout || false),
+    checkoutBranch: (projectPath: string, branchName: string) => ipcRenderer.invoke('git:checkout', projectPath, branchName),
+    pullChanges: (projectPath: string) => ipcRenderer.invoke('git:pull', projectPath),
+    pushChanges: (projectPath: string) => ipcRenderer.invoke('git:push', projectPath),
+
+    // Format
+    formatDocument: (filePath: string, projectPath: string) => ipcRenderer.invoke('format:document', filePath, projectPath),
+    checkFormatting: (filePath: string, projectPath: string) => ipcRenderer.invoke('format:check', filePath, projectPath),
+    getFormatConfig: (projectPath: string) => ipcRenderer.invoke('format:config', projectPath),
+
+    // Debug
+    startNodeDebug: (scriptPath: string, cwd: string, args: string[]) => ipcRenderer.invoke('debug:startNode', scriptPath, cwd, args),
+    startPythonDebug: (scriptPath: string, cwd: string, args: string[]) => ipcRenderer.invoke('debug:startPython', scriptPath, cwd, args),
+    stopDebug: (sessionId: string) => ipcRenderer.invoke('debug:stop', sessionId),
+    pauseDebug: (sessionId: string) => ipcRenderer.invoke('debug:pause', sessionId),
+    continueDebug: (sessionId: string) => ipcRenderer.invoke('debug:continue', sessionId),
+    stepOver: (sessionId: string) => ipcRenderer.invoke('debug:stepOver', sessionId),
+    stepInto: (sessionId: string) => ipcRenderer.invoke('debug:stepInto', sessionId),
+    stepOut: (sessionId: string) => ipcRenderer.invoke('debug:stepOut', sessionId),
+    setBreakpoint: (sessionId: string, file: string, line: number, condition?: string) => 
+        ipcRenderer.invoke('debug:setBreakpoint', sessionId, file, line, condition),
+    removeBreakpoint: (sessionId: string, file: string, line: number) => 
+        ipcRenderer.invoke('debug:removeBreakpoint', sessionId, file, line),
+    getBreakpoints: (sessionId: string, file?: string) => ipcRenderer.invoke('debug:getBreakpoints', sessionId, file),
+    getActiveDebugSessions: () => ipcRenderer.invoke('debug:getActiveSessions'),
+    getDebugSessionInfo: (sessionId: string) => ipcRenderer.invoke('debug:getSessionInfo', sessionId),
+    onDebugOutput: (callback: (data: { sessionId: string; output: string; type: string }) => void) => {
+        const handler = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('debug:output', handler)
+        return () => ipcRenderer.removeListener('debug:output', handler)
+    },
+    onDebugStarted: (callback: (data: { sessionId: string; type: string }) => void) => {
+        const handler = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('debug:started', handler)
+        return () => ipcRenderer.removeListener('debug:started', handler)
+    },
+    onDebugStopped: (callback: (data: { sessionId: string }) => void) => {
+        const handler = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('debug:stopped', handler)
+        return () => ipcRenderer.removeListener('debug:stopped', handler)
+    },
+    onDebugTerminated: (callback: (data: { sessionId: string; code: number | null }) => void) => {
+        const handler = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('debug:terminated', handler)
+        return () => ipcRenderer.removeListener('debug:terminated', handler)
+    },
+    onDebugPaused: (callback: (data: { sessionId: string }) => void) => {
+        const handler = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('debug:paused', handler)
+        return () => ipcRenderer.removeListener('debug:paused', handler)
+    },
+    onDebugContinued: (callback: (data: { sessionId: string }) => void) => {
+        const handler = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('debug:continued', handler)
+        return () => ipcRenderer.removeListener('debug:continued', handler)
     }
 }
 

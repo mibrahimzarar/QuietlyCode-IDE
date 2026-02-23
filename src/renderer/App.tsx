@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useState } from 'react'
 import { useApp } from './store/appStore'
 import SetupScreen from './components/SetupScreen'
 import TitleBar from './components/TitleBar'
@@ -13,11 +13,14 @@ import DiffPreview from './components/DiffPreview'
 import ContextMenu from './components/ContextMenu'
 import TerminalPanel from './components/TerminalPanel'
 import ProblemsPanel from './components/ProblemsPanel'
+import QuickOpen from './components/QuickOpen'
+import DebugPanel from './components/DebugPanel'
 
 export default function App() {
     const { state, dispatch } = useApp()
-    const [bottomTab, setBottomTab] = React.useState<'terminal' | 'problems'>('terminal')
+    const [bottomTab, setBottomTab] = React.useState<'terminal' | 'problems' | 'debug'>('terminal')
     const [isBottomPanelMaximized, setIsBottomPanelMaximized] = React.useState(false)
+    const [isInitializing, setIsInitializing] = useState(true)
 
     const toggleBottomPanelMaximized = useCallback(() => {
         setIsBottomPanelMaximized(prev => !prev)
@@ -46,8 +49,13 @@ export default function App() {
                 const settings = await window.electronAPI.getSettings()
                 dispatch({ type: 'SET_SETTINGS', settings })
 
-                // If setup is complete, go to IDE
-                if (settings.setupComplete) {
+                // Check if this is a returning user (setupComplete with valid paths)
+                const isReturningUser = settings.setupComplete && 
+                    settings.modelPath && 
+                    settings.serverBinaryPath
+
+                if (isReturningUser) {
+                    // Returning user - go directly to IDE
                     dispatch({ type: 'SET_SCREEN', screen: 'ide' })
 
                     // Restore session
@@ -86,9 +94,17 @@ export default function App() {
                             dispatch({ type: 'SET_ACTIVE_FILE', path: settings.lastActiveFile })
                         }
                     }
+                } else {
+                    // New user - show setup/welcome screen
+                    dispatch({ type: 'SET_SCREEN', screen: 'setup' })
                 }
             } catch (e) {
                 console.error('Failed to load settings:', e)
+                // On error, show setup screen
+                dispatch({ type: 'SET_SCREEN', screen: 'setup' })
+            } finally {
+                // Small delay for elegant transition
+                setTimeout(() => setIsInitializing(false), 800)
             }
         }
         init()
@@ -184,6 +200,12 @@ export default function App() {
     // Global keyboard shortcuts
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
+            // Ctrl+P: Quick Open (prevent default browser print)
+            if (e.ctrlKey && e.key === 'p') {
+                e.preventDefault()
+                dispatch({ type: 'TOGGLE_QUICK_OPEN' })
+                return
+            }
             // Ctrl+Shift+P: Command Palette
             if (e.ctrlKey && e.shiftKey && e.key === 'P') {
                 e.preventDefault()
@@ -216,10 +238,16 @@ export default function App() {
             }
             // Escape: Close overlays
             if (e.key === 'Escape') {
+                if (state.showQuickOpen) dispatch({ type: 'TOGGLE_QUICK_OPEN' })
                 if (state.showCommandPalette) dispatch({ type: 'TOGGLE_COMMAND_PALETTE' })
                 if (state.showSettings) dispatch({ type: 'TOGGLE_SETTINGS' })
                 if (state.diffPreview) dispatch({ type: 'SET_DIFF_PREVIEW', diff: null })
                 if (state.contextMenu) dispatch({ type: 'SET_CONTEXT_MENU', menu: null })
+            }
+            // Ctrl+\\: Toggle split editor
+            if (e.ctrlKey && e.key === '\\') {
+                e.preventDefault()
+                dispatch({ type: 'TOGGLE_SPLIT_EDITOR' })
             }
         }
         window.addEventListener('keydown', handleKeyDown)
@@ -229,63 +257,98 @@ export default function App() {
 
     return (
         <div className="app-container">
-            <TitleBar />
-            {state.screen === 'setup' ? (
-                <SetupScreen />
-            ) : (
-                <div className="main-layout">
-                    {state.sidebarVisible && <Sidebar />}
-                    <div className="editor-area">
-                        <div className="editor-main">
-                            <TabBar />
-                            <Editor />
-                        </div>
+            {/* Loading Screen with Bouncing Neon Dots */}
+            {(state.screen === 'loading' || isInitializing) && (
+                <div className="loading-screen">
+                    <div className="loading-logo">
+                        <img src="./assets/logo.jpg" alt="QuietlyCode" />
+                    </div>
+                    <div className="loading-dots">
+                        <div className="loading-dot" />
+                        <div className="loading-dot" />
+                        <div className="loading-dot" />
+                    </div>
+                    <div className="loading-text">Starting QuietlyCode...</div>
+                </div>
+            )}
 
-                        {state.terminalVisible && (
-                            <div className={`bottom-panel-container ${isBottomPanelMaximized ? 'maximized' : ''}`}>
-                                <div className="bottom-panel-tabs">
-                                    <div
-                                        className={`bottom-tab ${bottomTab === 'terminal' ? 'active' : ''}`}
-                                        onClick={() => setBottomTab('terminal')}
-                                    >
-                                        TERMINAL
-                                    </div>
-                                    <div
-                                        className={`bottom-tab ${bottomTab === 'problems' ? 'active' : ''}`}
-                                        onClick={() => setBottomTab('problems')}
-                                    >
-                                        PROBLEMS
-                                        {state.problems.length > 0 && (
-                                            <span className="bottom-tab-badge">{state.problems.length}</span>
+            {!isInitializing && (
+                <>
+                    <TitleBar />
+                    {state.screen === 'setup' ? (
+                        <SetupScreen />
+                    ) : state.screen === 'ide' ? (
+                        <div className="main-layout">
+                            {state.sidebarVisible && <Sidebar />}
+                            <div className="editor-area">
+                                <div className={`editor-main ${state.splitEditor.enabled ? 'split' : ''}`}>
+                                    <TabBar />
+                                    <div className="editor-content">
+                                        <Editor isSecondary={false} />
+                                        {state.splitEditor.enabled && (
+                                            <Editor isSecondary={true} />
                                         )}
                                     </div>
                                 </div>
-                                <div className="bottom-panel-content">
-                                    {bottomTab === 'terminal' ? (
-                                        <TerminalPanel
-                                            isMaximized={isBottomPanelMaximized}
-                                            onToggleMaximize={toggleBottomPanelMaximized}
-                                        />
-                                    ) : (
-                                        <ProblemsPanel
-                                            isMaximized={isBottomPanelMaximized}
-                                            onToggleMaximize={toggleBottomPanelMaximized}
-                                        />
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    {state.chatPanelVisible && <ChatPanel />}
-                </div>
-            )}
-            <StatusBar />
 
-            {/* Overlays */}
-            {state.showSettings && <SettingsPanel />}
-            {state.showCommandPalette && <CommandPalette />}
-            {state.diffPreview && <DiffPreview />}
-            {state.contextMenu && <ContextMenu />}
+                                {state.terminalVisible && (
+                                    <div className={`bottom-panel-container ${isBottomPanelMaximized ? 'maximized' : ''}`}>
+                                        <div className="bottom-panel-tabs">
+                                            <div
+                                                className={`bottom-tab ${bottomTab === 'terminal' ? 'active' : ''}`}
+                                                onClick={() => setBottomTab('terminal')}
+                                            >
+                                                TERMINAL
+                                            </div>
+                                            <div
+                                                className={`bottom-tab ${bottomTab === 'problems' ? 'active' : ''}`}
+                                                onClick={() => setBottomTab('problems')}
+                                            >
+                                                PROBLEMS
+                                                {state.problems.length > 0 && (
+                                                    <span className="bottom-tab-badge">{state.problems.length}</span>
+                                                )}
+                                            </div>
+                                            <div
+                                                className={`bottom-tab ${bottomTab === 'debug' ? 'active' : ''}`}
+                                                onClick={() => setBottomTab('debug')}
+                                            >
+                                                DEBUG
+                                            </div>
+                                        </div>
+                                        <div className="bottom-panel-content">
+                                            {bottomTab === 'terminal' && (
+                                                <TerminalPanel
+                                                    isMaximized={isBottomPanelMaximized}
+                                                    onToggleMaximize={toggleBottomPanelMaximized}
+                                                />
+                                            )}
+                                            {bottomTab === 'problems' && (
+                                                <ProblemsPanel
+                                                    isMaximized={isBottomPanelMaximized}
+                                                    onToggleMaximize={toggleBottomPanelMaximized}
+                                                />
+                                            )}
+                                            {bottomTab === 'debug' && (
+                                                <DebugPanel />
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            {state.chatPanelVisible && <ChatPanel />}
+                        </div>
+                    ) : null}
+                    <StatusBar />
+
+                    {/* Overlays */}
+                    {state.showQuickOpen && <QuickOpen />}
+                    {state.showSettings && <SettingsPanel />}
+                    {state.showCommandPalette && <CommandPalette />}
+                    {state.diffPreview && <DiffPreview />}
+                    {state.contextMenu && <ContextMenu />}
+                </>
+            )}
         </div>
     )
 }

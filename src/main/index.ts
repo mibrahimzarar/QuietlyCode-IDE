@@ -10,12 +10,20 @@ import { TerminalManager } from './terminal-manager'
 import { DiagnosticService } from './diagnostic-service'
 import { VectorStore } from './rag/vector-store'
 import { CodebaseIndexer } from './rag/indexer'
+import { LSPService } from './lsp-service'
+import { GitService } from './git-service'
+import { FormatService } from './format-service'
+import { DebugService } from './debug-service'
 
 let mainWindow: BrowserWindow | null = null
 let fileService: FileService
 let aiService: AIService
 let modelDownloader: ModelDownloader
 let diagnosticService: DiagnosticService
+let lspService: LSPService
+let gitService: GitService
+let formatService: FormatService
+let debugService: DebugService
 
 const SETTINGS_PATH = join(app.getPath('userData'), 'settings.json')
 
@@ -119,6 +127,10 @@ function setupIPC(): void {
     aiService = new AIService()
     modelDownloader = new ModelDownloader()
     diagnosticService = new DiagnosticService()
+    lspService = new LSPService()
+    gitService = new GitService()
+    formatService = new FormatService()
+    debugService = new DebugService()
 
     // --- Window Controls ---
     ipcMain.handle('window:minimize', () => mainWindow?.minimize())
@@ -515,6 +527,167 @@ function setupIPC(): void {
         if (!embedding) return []
         const results = await vectorStore.search(embedding, 5)
         return results
+    })
+
+    // --- LSP Service ---
+    ipcMain.handle('lsp:definition', async (_event, filePath: string, line: number, character: number) => {
+        return lspService.getDefinition(filePath, line, character)
+    })
+
+    ipcMain.handle('lsp:hover', async (_event, filePath: string, line: number, character: number) => {
+        return lspService.getHover(filePath, line, character)
+    })
+
+    ipcMain.handle('lsp:documentSymbols', async (_event, filePath: string) => {
+        return lspService.getDocumentSymbols(filePath)
+    })
+
+    // --- Git Service ---
+    ipcMain.handle('git:isRepo', async (_event, projectPath: string) => {
+        return gitService.isGitRepository(projectPath)
+    })
+
+    ipcMain.handle('git:status', async (_event, projectPath: string) => {
+        return gitService.getStatus(projectPath)
+    })
+
+    ipcMain.handle('git:branches', async (_event, projectPath: string) => {
+        return gitService.getBranches(projectPath)
+    })
+
+    ipcMain.handle('git:currentBranch', async (_event, projectPath: string) => {
+        return gitService.getCurrentBranch(projectPath)
+    })
+
+    ipcMain.handle('git:commits', async (_event, projectPath: string, count: number) => {
+        return gitService.getCommits(projectPath, count)
+    })
+
+    ipcMain.handle('git:diff', async (_event, projectPath: string, filePath?: string) => {
+        return gitService.getDiff(projectPath, filePath)
+    })
+
+    ipcMain.handle('git:stage', async (_event, projectPath: string, filePath: string) => {
+        return gitService.stageFile(projectPath, filePath)
+    })
+
+    ipcMain.handle('git:unstage', async (_event, projectPath: string, filePath: string) => {
+        return gitService.unstageFile(projectPath, filePath)
+    })
+
+    ipcMain.handle('git:discard', async (_event, projectPath: string, filePath: string) => {
+        return gitService.discardChanges(projectPath, filePath)
+    })
+
+    ipcMain.handle('git:commit', async (_event, projectPath: string, message: string) => {
+        return gitService.commit(projectPath, message)
+    })
+
+    ipcMain.handle('git:createBranch', async (_event, projectPath: string, branchName: string, checkout: boolean) => {
+        return gitService.createBranch(projectPath, branchName, checkout)
+    })
+
+    ipcMain.handle('git:checkout', async (_event, projectPath: string, branchName: string) => {
+        return gitService.checkoutBranch(projectPath, branchName)
+    })
+
+    ipcMain.handle('git:pull', async (_event, projectPath: string) => {
+        return gitService.pull(projectPath)
+    })
+
+    ipcMain.handle('git:push', async (_event, projectPath: string) => {
+        return gitService.push(projectPath)
+    })
+
+    // --- Format Service ---
+    ipcMain.handle('format:document', async (_event, filePath: string, projectPath: string) => {
+        return formatService.formatDocument(filePath, projectPath)
+    })
+
+    ipcMain.handle('format:check', async (_event, filePath: string, projectPath: string) => {
+        return formatService.checkFormatting(filePath, projectPath)
+    })
+
+    ipcMain.handle('format:config', async (_event, projectPath: string) => {
+        return formatService.getPrettierConfig(projectPath)
+    })
+
+    // --- Debug Service ---
+    ipcMain.handle('debug:startNode', async (_event, scriptPath: string, cwd: string, args: string[]) => {
+        return debugService.startNodeDebug(scriptPath, cwd, args)
+    })
+
+    ipcMain.handle('debug:startPython', async (_event, scriptPath: string, cwd: string, args: string[]) => {
+        return debugService.startPythonDebug(scriptPath, cwd, args)
+    })
+
+    ipcMain.handle('debug:stop', async (_event, sessionId: string) => {
+        return debugService.stopDebug(sessionId)
+    })
+
+    ipcMain.handle('debug:pause', async (_event, sessionId: string) => {
+        return debugService.pauseDebug(sessionId)
+    })
+
+    ipcMain.handle('debug:continue', async (_event, sessionId: string) => {
+        return debugService.continueDebug(sessionId)
+    })
+
+    ipcMain.handle('debug:stepOver', async (_event, sessionId: string) => {
+        return debugService.stepOver(sessionId)
+    })
+
+    ipcMain.handle('debug:stepInto', async (_event, sessionId: string) => {
+        return debugService.stepInto(sessionId)
+    })
+
+    ipcMain.handle('debug:stepOut', async (_event, sessionId: string) => {
+        return debugService.stepOut(sessionId)
+    })
+
+    ipcMain.handle('debug:setBreakpoint', async (_event, sessionId: string, file: string, line: number, condition?: string) => {
+        return debugService.setBreakpoint(sessionId, file, line, condition)
+    })
+
+    ipcMain.handle('debug:removeBreakpoint', async (_event, sessionId: string, file: string, line: number) => {
+        return debugService.removeBreakpoint(sessionId, file, line)
+    })
+
+    ipcMain.handle('debug:getBreakpoints', async (_event, sessionId: string, file?: string) => {
+        return debugService.getBreakpoints(sessionId, file)
+    })
+
+    ipcMain.handle('debug:getActiveSessions', async () => {
+        return debugService.getActiveSessions()
+    })
+
+    ipcMain.handle('debug:getSessionInfo', async (_event, sessionId: string) => {
+        return debugService.getSessionInfo(sessionId)
+    })
+
+    // Debug event forwarding to renderer
+    debugService.on('output', (data) => {
+        mainWindow?.webContents.send('debug:output', data)
+    })
+
+    debugService.on('started', (data) => {
+        mainWindow?.webContents.send('debug:started', data)
+    })
+
+    debugService.on('stopped', (data) => {
+        mainWindow?.webContents.send('debug:stopped', data)
+    })
+
+    debugService.on('terminated', (data) => {
+        mainWindow?.webContents.send('debug:terminated', data)
+    })
+
+    debugService.on('paused', (data) => {
+        mainWindow?.webContents.send('debug:paused', data)
+    })
+
+    debugService.on('continued', (data) => {
+        mainWindow?.webContents.send('debug:continued', data)
     })
 }
 
