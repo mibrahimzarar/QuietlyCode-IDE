@@ -24,6 +24,7 @@ const electronAPI = {
     patchFile: (path: string, patches: { search: string; replace: string }[]) => ipcRenderer.invoke('fs:patchFile', path, patches),
     lintCodebase: (path: string) => ipcRenderer.invoke('fs:lintCodebase', path),
     getFileTree: (path: string) => ipcRenderer.invoke('fs:getFileTree', path),
+    expandDirectory: (path: string) => ipcRenderer.invoke('fs:expandDirectory', path),
     createFile: (path: string) => ipcRenderer.invoke('fs:createFile', path),
     createFolder: (path: string) => ipcRenderer.invoke('fs:createFolder', path),
     renameFile: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),

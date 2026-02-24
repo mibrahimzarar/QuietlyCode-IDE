@@ -22,6 +22,7 @@ declare global {
             patchFile: (path: string, patches: { search: string; replace: string }[]) => Promise<{ success: boolean; error?: string }>
             lintCodebase: (projectPath: string) => Promise<{ success: boolean; problems?: any[]; error?: string }>
             getFileTree: (path: string) => Promise<any[]>
+            expandDirectory: (path: string) => Promise<any[]>
             createFile: (path: string) => Promise<{ success: boolean; error?: string }>
             createFolder: (path: string) => Promise<{ success: boolean; error?: string }>
             renameFile: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>

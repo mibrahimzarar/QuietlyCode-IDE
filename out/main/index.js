@@ -53,7 +53,6 @@ function _interopNamespaceDefault(e) {
 const path__namespace = /* @__PURE__ */ _interopNamespaceDefault(path);
 const fs__namespace = /* @__PURE__ */ _interopNamespaceDefault(fs);
 const IGNORED_DIRS = /* @__PURE__ */ new Set([
-  "node_modules",
   ".git",
   ".svn",
   ".hg",
@@ -61,19 +60,22 @@ const IGNORED_DIRS = /* @__PURE__ */ new Set([
   ".idea",
   ".vscode",
   ".vs",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  ".nuxt",
   ".cache",
-  "coverage",
   ".DS_Store"
 ]);
 const IGNORED_FILES = /* @__PURE__ */ new Set([
   ".DS_Store",
   "Thumbs.db",
   "desktop.ini"
+]);
+const VISIBLE_IGNORED_DIRS = /* @__PURE__ */ new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".nuxt",
+  "coverage"
 ]);
 const execAsync$3 = util.promisify(child_process.exec);
 class FileService {
@@ -106,7 +108,7 @@ class FileService {
       this.gitStatusMap = /* @__PURE__ */ new Map();
     }
   }
-  async getFileTree(dirPath, depth = 0, maxDepth = 20) {
+  async getFileTree(dirPath, depth = 0, maxDepth = 20, isExpandingIgnored = false) {
     if (depth === 0) {
       await this.getGitStatus(dirPath);
     }
@@ -122,14 +124,19 @@ class FileService {
       for (const entry of sorted) {
         if (IGNORED_DIRS.has(entry.name) || IGNORED_FILES.has(entry.name)) continue;
         const fullPath = path.join(dirPath, entry.name);
+        const isVisibleIgnored = VISIBLE_IGNORED_DIRS.has(entry.name);
         const node2 = {
           name: entry.name,
           path: fullPath,
           isDirectory: entry.isDirectory(),
-          gitStatus: this.gitStatusMap.get(fullPath)
+          gitStatus: isVisibleIgnored ? "ignored" : this.gitStatusMap.get(fullPath)
         };
         if (entry.isDirectory()) {
-          node2.children = await this.getFileTree(fullPath, depth + 1, maxDepth);
+          if (isVisibleIgnored && depth === 0 && !isExpandingIgnored) {
+            node2.children = [];
+          } else {
+            node2.children = await this.getFileTree(fullPath, depth + 1, maxDepth, isExpandingIgnored);
+          }
         }
         nodes.push(node2);
       }
@@ -138,6 +145,10 @@ class FileService {
       console.error("Error reading directory:", dirPath, err);
       return [];
     }
+  }
+  // Method to load contents of a specific directory (for expanding ignored dirs)
+  async expandDirectory(dirPath) {
+    return this.getFileTree(dirPath, 1, 20, true);
   }
   readFile(filePath) {
     try {
@@ -1052,13 +1063,24 @@ class TerminalManager {
     this.window = window;
   }
   createSession(id, shell, cwd) {
+    console.log("TerminalManager.createSession called with shell:", shell);
     try {
       const isWin = os.platform() === "win32";
-      let shellCmd = shell;
+      let shellCmd = shell || "powershell.exe";
       let shellArgs = [];
       if (isWin) {
-        shellCmd = shell || "powershell.exe";
-        shellArgs = ["-NoProfile", "-ExecutionPolicy", "Bypass"];
+        const shellLower = (shell || "").toLowerCase();
+        if (shellLower.includes("powershell")) {
+          shellArgs = ["-NoProfile", "-ExecutionPolicy", "Bypass"];
+        } else if (shellLower.includes("cmd")) {
+          shellArgs = [];
+        } else if (shellLower.includes("bash") || shellLower.includes("git")) {
+          shellArgs = ["--login", "-i"];
+        } else if (shellLower.includes("wsl")) {
+          shellArgs = [];
+        } else if (!shell) {
+          shellArgs = ["-NoProfile", "-ExecutionPolicy", "Bypass"];
+        }
       } else {
         shellCmd = shell || "/bin/bash";
       }
@@ -1113,10 +1135,32 @@ class TerminalManager {
     if (os.platform() === "win32") {
       shells.push("powershell.exe");
       shells.push("cmd.exe");
+      const gitBashPaths = [
+        "C:\\Git\\bin\\bash.exe",
+        "C:\\Git\\usr\\bin\\bash.exe",
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+        "C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe",
+        process.env.LOCALAPPDATA + "\\Programs\\Git\\bin\\bash.exe",
+        process.env.PROGRAMFILES + "\\Git\\bin\\bash.exe"
+      ].filter(Boolean);
+      console.log("Checking Git Bash paths:", gitBashPaths);
+      for (const gitBash of gitBashPaths) {
+        if (fs.existsSync(gitBash)) {
+          console.log("Found Git Bash at:", gitBash);
+          shells.push(gitBash);
+          break;
+        }
+      }
+      if (fs.existsSync("C:\\Windows\\System32\\wsl.exe")) {
+        shells.push("wsl.exe");
+      }
     } else {
       shells.push("/bin/bash");
       shells.push("/bin/zsh");
     }
+    console.log("Detected shells:", shells);
     return shells;
   }
 }
@@ -2311,6 +2355,9 @@ function setupIPC() {
   });
   electron.ipcMain.handle("fs:getFileTree", async (_event, folderPath) => {
     return fileService.getFileTree(folderPath);
+  });
+  electron.ipcMain.handle("fs:expandDirectory", async (_event, dirPath) => {
+    return fileService.expandDirectory(dirPath);
   });
   electron.ipcMain.handle("fs:createFile", async (_event, filePath) => {
     try {

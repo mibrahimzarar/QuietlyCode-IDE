@@ -196,6 +196,10 @@ function setupIPC(): void {
         return fileService.getFileTree(folderPath)
     })
 
+    ipcMain.handle('fs:expandDirectory', async (_event, dirPath: string) => {
+        return fileService.expandDirectory(dirPath)
+    })
+
     ipcMain.handle('fs:createFile', async (_event, filePath: string) => {
         try {
             const dir = dirname(filePath)

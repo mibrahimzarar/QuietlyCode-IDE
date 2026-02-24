@@ -1,13 +1,12 @@
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
 import { BrowserWindow } from 'electron'
 import { platform } from 'os'
+import { existsSync } from 'fs'
+import * as pty from 'node-pty'
 
 interface TerminalSession {
     id: string
-    process: ChildProcessWithoutNullStreams
-    history: string
+    pty: pty.IPty
 }
-
 
 export class TerminalManager {
     private sessions: Map<string, TerminalSession> = new Map()
@@ -22,49 +21,52 @@ export class TerminalManager {
     }
 
     createSession(id: string, shell: string, cwd: string) {
+        console.log('TerminalManager.createSession called with shell:', shell)
         try {
             const isWin = platform() === 'win32'
-            let shellCmd = shell
+            let shellCmd = shell || 'powershell.exe'
             let shellArgs: string[] = []
 
             if (isWin) {
-                shellCmd = shell || 'powershell.exe'
-                shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass']
+                // Determine args based on shell type
+                const shellLower = (shell || '').toLowerCase()
+                
+                if (shellLower.includes('powershell')) {
+                    shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass']
+                } else if (shellLower.includes('cmd')) {
+                    shellArgs = []
+                } else if (shellLower.includes('bash') || shellLower.includes('git')) {
+                    // Git Bash - run as interactive login shell
+                    shellArgs = ['--login', '-i']
+                } else if (shellLower.includes('wsl')) {
+                    shellArgs = []
+                } else if (!shell) {
+                    shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass']
+                }
             } else {
                 shellCmd = shell || '/bin/bash'
             }
 
-            const terminalProcess = spawn(shellCmd, shellArgs, {
-                cwd,
-                env: { ...process.env, TERM: 'xterm-256color' },
-                shell: false
+            const ptyProcess = pty.spawn(shellCmd, shellArgs, {
+                name: 'xterm-256color',
+                cols: 80,
+                rows: 24,
+                cwd: cwd || process.cwd(),
+                env: process.env as { [key: string]: string }
             })
 
-            const normalizeOutput = (data: any) => {
-                let str = data.toString()
-                // Normalize line endings for xterm.js
-                return str.replace(/\r?\n/g, '\r\n')
-            }
-
-            terminalProcess.stdout.on('data', (data: any) => {
-                this.window?.webContents.send('terminal:data', { id, data: normalizeOutput(data) })
+            ptyProcess.onData((data: string) => {
+                this.window?.webContents.send('terminal:data', { id, data })
             })
 
-            terminalProcess.stderr.on('data', (data: any) => {
-                const normalized = normalizeOutput(data)
-                // Wrap in ANSI red color: \x1b[31m ... \x1b[0m
-                this.window?.webContents.send('terminal:data', { id, data: `\x1b[31m${normalized}\x1b[0m` })
-            })
-
-            terminalProcess.on('exit', (code: number | null) => {
-                this.window?.webContents.send('terminal:exit', { id, code: code || 0 })
+            ptyProcess.onExit(({ exitCode }) => {
+                this.window?.webContents.send('terminal:exit', { id, code: exitCode })
                 this.sessions.delete(id)
             })
 
             this.sessions.set(id, {
                 id,
-                process: terminalProcess,
-                history: ''
+                pty: ptyProcess
             })
 
             return { success: true }
@@ -77,20 +79,25 @@ export class TerminalManager {
     write(id: string, data: string) {
         const session = this.sessions.get(id)
         if (session) {
-            session.process.stdin.write(data)
+            session.pty.write(data)
         }
     }
 
     resize(id: string, cols: number, rows: number) {
-        // 'spawn' doesn't support resizing natively like PTY.
-        // We can ignore this or try to set COLUMNS/LINES env via some hack, 
-        // but generally for 'spawn' we just let it flow.
+        const session = this.sessions.get(id)
+        if (session && cols > 0 && rows > 0) {
+            try {
+                session.pty.resize(cols, rows)
+            } catch (e) {
+                console.error('PTY resize error:', e)
+            }
+        }
     }
 
     kill(id: string) {
         const session = this.sessions.get(id)
         if (session) {
-            session.process.kill()
+            session.pty.kill()
             this.sessions.delete(id)
         }
     }
@@ -100,11 +107,37 @@ export class TerminalManager {
         if (platform() === 'win32') {
             shells.push('powershell.exe')
             shells.push('cmd.exe')
-            // Check for Git Bash / WSL could be added here if we want to be fancy
+            
+            // Check for Git Bash - check common locations including C:\Git
+            const gitBashPaths = [
+                'C:\\Git\\bin\\bash.exe',
+                'C:\\Git\\usr\\bin\\bash.exe',
+                'C:\\Program Files\\Git\\bin\\bash.exe',
+                'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+                'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+                'C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe',
+                process.env.LOCALAPPDATA + '\\Programs\\Git\\bin\\bash.exe',
+                process.env.PROGRAMFILES + '\\Git\\bin\\bash.exe',
+            ].filter(Boolean) as string[]
+            
+            console.log('Checking Git Bash paths:', gitBashPaths)
+            for (const gitBash of gitBashPaths) {
+                if (existsSync(gitBash)) {
+                    console.log('Found Git Bash at:', gitBash)
+                    shells.push(gitBash)
+                    break
+                }
+            }
+            
+            // Check for WSL
+            if (existsSync('C:\\Windows\\System32\\wsl.exe')) {
+                shells.push('wsl.exe')
+            }
         } else {
             shells.push('/bin/bash')
             shells.push('/bin/zsh')
         }
+        console.log('Detected shells:', shells)
         return shells
     }
 }

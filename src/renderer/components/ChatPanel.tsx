@@ -81,9 +81,11 @@ export default function ChatPanel() {
     // File actions state
     const [fileActions, setFileActions] = useState<Record<string, FileAction>>({})
 
-    // Auto-scroll
+    // Auto-scroll - only scroll messages container, not the whole page
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+        }
     }, [state.chatMessages])
 
     // Stream listeners
@@ -372,7 +374,6 @@ export default function ChatPanel() {
             // Clear the pending state
             dispatch({ type: 'MENTION_FILE', filename: '' }) // Clearing by setting empty or we could add a specific CLEAR action.
             // Actually I defined MENTION_FILE as setting the string. If I set it to '' it reads as ''?
-            // Wait, my reducer says `pendingChatMention: action.filename`.
             // So calling it with '' sets it to ''.
             // But I need to check `if (state.pendingChatMention)` which will be false for ''.
             // So this works.
@@ -1018,3 +1019,4 @@ function renderContent(
 
     return elements
 }
+

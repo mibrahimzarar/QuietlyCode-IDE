@@ -10,13 +10,18 @@ export interface FileTreeNode {
 }
 
 const IGNORED_DIRS = new Set([
-    'node_modules', '.git', '.svn', '.hg', '__pycache__',
-    '.idea', '.vscode', '.vs', 'dist', 'build', 'out',
-    '.next', '.nuxt', '.cache', 'coverage', '.DS_Store'
+    '.git', '.svn', '.hg', '__pycache__',
+    '.idea', '.vscode', '.vs', '.cache', '.DS_Store'
 ])
 
 const IGNORED_FILES = new Set([
     '.DS_Store', 'Thumbs.db', 'desktop.ini'
+])
+
+// Directories that should be visible but marked as ignored
+const VISIBLE_IGNORED_DIRS = new Set([
+    'node_modules', 'dist', 'build', 'out',
+    '.next', '.nuxt', 'coverage'
 ])
 
 import { exec } from 'child_process'
@@ -56,7 +61,7 @@ export class FileService {
         }
     }
 
-    async getFileTree(dirPath: string, depth: number = 0, maxDepth: number = 20): Promise<FileTreeNode[]> {
+    async getFileTree(dirPath: string, depth: number = 0, maxDepth: number = 20, isExpandingIgnored: boolean = false): Promise<FileTreeNode[]> {
         if (depth === 0) {
             await this.getGitStatus(dirPath)
         }
@@ -74,18 +79,28 @@ export class FileService {
             })
 
             for (const entry of sorted) {
+                // Skip completely hidden directories
                 if (IGNORED_DIRS.has(entry.name) || IGNORED_FILES.has(entry.name)) continue
 
                 const fullPath = join(dirPath, entry.name)
+                
+                // Check if this is a visible ignored directory (like node_modules)
+                const isVisibleIgnored = VISIBLE_IGNORED_DIRS.has(entry.name)
+                
                 const node: FileTreeNode = {
                     name: entry.name,
                     path: fullPath,
                     isDirectory: entry.isDirectory(),
-                    gitStatus: this.gitStatusMap.get(fullPath)
+                    gitStatus: isVisibleIgnored ? 'ignored' : this.gitStatusMap.get(fullPath)
                 }
 
                 if (entry.isDirectory()) {
-                    node.children = await this.getFileTree(fullPath, depth + 1, maxDepth)
+                    // For visible ignored dirs, only load children if explicitly expanding (depth > 0 and isExpandingIgnored)
+                    if (isVisibleIgnored && depth === 0 && !isExpandingIgnored) {
+                        node.children = [] // Empty array to show it's expandable
+                    } else {
+                        node.children = await this.getFileTree(fullPath, depth + 1, maxDepth, isExpandingIgnored)
+                    }
                 }
 
                 nodes.push(node)
@@ -96,6 +111,11 @@ export class FileService {
             console.error('Error reading directory:', dirPath, err)
             return []
         }
+    }
+
+    // Method to load contents of a specific directory (for expanding ignored dirs)
+    async expandDirectory(dirPath: string): Promise<FileTreeNode[]> {
+        return this.getFileTree(dirPath, 1, 20, true)
     }
 
     readFile(filePath: string): { success: boolean; content?: string; error?: string } {

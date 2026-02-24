@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../store/appStore'
-import { Terminal as TerminalIcon, Plus, X, Maximize2, Minimize2, SplitSquareHorizontal, ChevronDown, Bot } from 'lucide-react'
+import { Terminal as TerminalIcon, Plus, X, Maximize2, Minimize2, SplitSquareHorizontal, ChevronDown, Bot, ChevronUp } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 // @ts-ignore
@@ -25,13 +26,25 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
     const [splitMode, setSplitMode] = useState(false)
     const [shell, setShell] = useState('')
+    const shellRef = useRef('')
     const [availableShells, setAvailableShells] = useState<string[]>([])
+    const [showShellDropdown, setShowShellDropdown] = useState(false)
+    const shellSelectorRef = useRef<HTMLDivElement>(null)
+    const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
+
+    // Keep shellRef in sync with shell state
+    useEffect(() => {
+        shellRef.current = shell
+    }, [shell])
 
     // Load available shells on mount
     useEffect(() => {
         window.electronAPI.getShells().then(shells => {
             setAvailableShells(shells)
-            if (shells.length > 0) setShell(shells[0])
+            if (shells.length > 0) {
+                setShell(shells[0])
+                shellRef.current = shells[0]
+            }
         })
     }, [])
 
@@ -115,7 +128,39 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         }
     }, [sessions])
 
+    // Calculate dropdown position when opening
+    useEffect(() => {
+        if (showShellDropdown && shellSelectorRef.current) {
+            const rect = shellSelectorRef.current.getBoundingClientRect()
+            const dropdownHeight = Math.min(availableShells.length * 32 + 8, 200)
+            setDropdownPosition({
+                top: rect.top - dropdownHeight - 4,
+                left: rect.left
+            })
+        }
+    }, [showShellDropdown, availableShells.length])
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        if (!showShellDropdown) return
+        
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            // Check if click is inside the shell selector OR the portal dropdown
+            const isInsideSelector = shellSelectorRef.current?.contains(target)
+            const isInsidePortal = target.closest('.shell-dropdown-portal')
+            
+            if (!isInsideSelector && !isInsidePortal) {
+                setShowShellDropdown(false)
+            }
+        }
+        
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [showShellDropdown])
+
     function createNewSession() {
+        console.log('createNewSession called, shellRef.current:', shellRef.current)
         const id = `term-${Date.now()}`
         const newSession: TerminalSession = {
             id,
@@ -255,7 +300,8 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         session.fitAddon = fitAddon
 
         // Create backend process
-        await window.electronAPI.createTerminal(session.id, shell, state.projectPath || '')
+        console.log('Creating terminal with shell:', shellRef.current)
+        await window.electronAPI.createTerminal(session.id, shellRef.current, state.projectPath || '')
 
         term.focus()
     }
@@ -280,7 +326,63 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         }
     }
 
+    function getShellDisplayName(shellPath: string): string {
+        if (!shellPath) return 'Shell'
+        const name = shellPath.toLowerCase()
+        if (name.includes('powershell')) return 'PowerShell'
+        if (name.includes('cmd')) return 'CMD'
+        if (name.includes('bash') || name.includes('git')) return 'Git Bash'
+        if (name.includes('wsl')) return 'WSL'
+        if (name.includes('zsh')) return 'Zsh'
+        // Extract just the filename for other shells
+        const parts = shellPath.split(/[\\/]/)
+        return parts[parts.length - 1].replace('.exe', '')
+    }
+
     const activeSession = sessions.find(s => s.id === activeSessionId)
+
+    // Dropdown portal component
+    const dropdownPortal = showShellDropdown ? createPortal(
+        <div 
+            className="shell-dropdown-portal"
+            style={{
+                position: 'fixed',
+                top: `${dropdownPosition.top}px`,
+                left: `${dropdownPosition.left}px`,
+                minWidth: '160px',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-primary)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.5)',
+                zIndex: 10000,
+                padding: '4px',
+                maxHeight: '200px',
+                overflowY: 'auto',
+            }}
+        >
+            {availableShells.map(s => (
+                <div
+                    key={s}
+                    className={`shell-dropdown-item ${shell === s ? 'active' : ''}`}
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        const previousShell = shellRef.current
+                        setShell(s)
+                        shellRef.current = s
+                        setShowShellDropdown(false)
+                        
+                        // Auto-create new terminal with selected shell if different
+                        if (s !== previousShell) {
+                            setTimeout(() => createNewSession(), 100)
+                        }
+                    }}
+                >
+                    {getShellDisplayName(s)}
+                </div>
+            ))}
+        </div>,
+        document.body
+    ) : null
 
     return (
         <div className="terminal-panel-wrapper">
@@ -299,6 +401,18 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                     <button className="toolbar-btn" onClick={createNewSession} title="New Terminal">
                         <Plus size={14} />
                     </button>
+                    
+                    {/* Shell selector dropdown */}
+                    <div className="shell-selector" ref={shellSelectorRef}>
+                        <button 
+                            className="shell-selector-btn"
+                            onClick={() => setShowShellDropdown(!showShellDropdown)}
+                            title="Select Shell"
+                        >
+                            <span>{getShellDisplayName(shell)}</span>
+                            {showShellDropdown ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        </button>
+                    </div>
                 </div>
 
                 <div className="terminal-actions">
@@ -351,6 +465,9 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                     </div>
                 )}
             </div>
+            
+            {/* Render dropdown via portal */}
+            {dropdownPortal}
         </div>
     )
 }

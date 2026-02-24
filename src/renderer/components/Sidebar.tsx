@@ -3,16 +3,15 @@ import { useApp, FileTreeNode } from '../store/appStore'
 import {
     FolderOpen, FolderClosed, FileText, ChevronRight, ChevronDown,
     FilePlus, FolderPlus, Search, Pencil, Trash2, Files, MessageSquare,
-    FileCode2, FileJson, FileType2, FileCog, FileImage, FileTerminal, FileSpreadsheet,
-    GitBranch
+    FileCode2, FileJson, FileType2, FileCog, FileImage, FileTerminal, FileSpreadsheet
 } from 'lucide-react'
-import SourceControlPanel from './SourceControlPanel'
 
-type SidebarTab = 'explorer' | 'search' | 'git'
+type SidebarTab = 'explorer' | 'search'
 
 export default function Sidebar() {
     const { state, dispatch } = useApp()
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
+    const [expandedDirContents, setExpandedDirContents] = useState<Map<string, FileTreeNode[]>>(new Map())
     const [activeTab, setActiveTab] = useState<SidebarTab>('explorer')
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState<{ file: string; line: number; content: string }[]>([])
@@ -32,18 +31,26 @@ export default function Sidebar() {
         }
     }
 
-    function toggleDir(path: string) {
+    async function toggleDir(path: string, node?: FileTreeNode) {
+        const isExpanding = !expandedDirs.has(path)
+        
         setExpandedDirs(prev => {
             const next = new Set(prev)
             if (next.has(path)) next.delete(path)
             else next.add(path)
             return next
         })
+        
+        // If expanding a directory with ignored status and no children loaded yet
+        if (isExpanding && node?.gitStatus === 'ignored' && (!node.children || node.children.length === 0)) {
+            const children = await window.electronAPI.expandDirectory(path)
+            setExpandedDirContents(prev => new Map(prev).set(path, children))
+        }
     }
 
     async function handleOpenFile(node: FileTreeNode) {
         if (node.isDirectory) {
-            toggleDir(node.path)
+            toggleDir(node.path, node)
             return
         }
         const result = await window.electronAPI.readFile(node.path)
@@ -264,7 +271,11 @@ export default function Sidebar() {
                         </div>
                     )}
 
-                    {node.isDirectory && isExpanded && node.children && renderTree(node.children, depth + 1)}
+                    {node.isDirectory && isExpanded && (
+                        node.gitStatus === 'ignored' && expandedDirContents.has(node.path)
+                            ? renderTree(expandedDirContents.get(node.path)!, depth + 1)
+                            : node.children && renderTree(node.children, depth + 1)
+                    )}
                 </div>
             )
         })
@@ -288,18 +299,9 @@ export default function Sidebar() {
                 >
                     <Search size={14} /> <span>Search</span>
                 </button>
-                <button
-                    className={`sidebar-tab ${activeTab === 'git' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('git')}
-                    title="Source Control"
-                >
-                    <GitBranch size={14} /> <span>Source Control</span>
-                </button>
             </div>
 
-            {activeTab === 'git' ? (
-                <SourceControlPanel />
-            ) : activeTab === 'explorer' ? (
+            {activeTab === 'explorer' ? (
                 <>
                     <div className="sidebar-header">
                         <h3>{state.projectPath ? state.projectPath.split('\\').pop() : 'Explorer'}</h3>
