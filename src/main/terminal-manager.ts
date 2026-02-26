@@ -21,7 +21,6 @@ export class TerminalManager {
     }
 
     createSession(id: string, shell: string, cwd: string) {
-        console.log('TerminalManager.createSession called with shell:', shell)
         try {
             const isWin = platform() === 'win32'
             let shellCmd = shell || 'powershell.exe'
@@ -30,7 +29,7 @@ export class TerminalManager {
             if (isWin) {
                 // Determine args based on shell type
                 const shellLower = (shell || '').toLowerCase()
-                
+
                 if (shellLower.includes('powershell')) {
                     shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass']
                 } else if (shellLower.includes('cmd')) {
@@ -71,7 +70,6 @@ export class TerminalManager {
 
             return { success: true }
         } catch (err: any) {
-            console.error('Failed to create terminal session:', err)
             return { success: false, error: err.message }
         }
     }
@@ -88,9 +86,7 @@ export class TerminalManager {
         if (session && cols > 0 && rows > 0) {
             try {
                 session.pty.resize(cols, rows)
-            } catch (e) {
-                console.error('PTY resize error:', e)
-            }
+            } catch (e) { /* ignore */ }
         }
     }
 
@@ -107,7 +103,7 @@ export class TerminalManager {
         if (platform() === 'win32') {
             shells.push('powershell.exe')
             shells.push('cmd.exe')
-            
+
             // Check for Git Bash - check common locations including C:\Git
             const gitBashPaths = [
                 'C:\\Git\\bin\\bash.exe',
@@ -119,16 +115,14 @@ export class TerminalManager {
                 process.env.LOCALAPPDATA + '\\Programs\\Git\\bin\\bash.exe',
                 process.env.PROGRAMFILES + '\\Git\\bin\\bash.exe',
             ].filter(Boolean) as string[]
-            
-            console.log('Checking Git Bash paths:', gitBashPaths)
+
             for (const gitBash of gitBashPaths) {
                 if (existsSync(gitBash)) {
-                    console.log('Found Git Bash at:', gitBash)
                     shells.push(gitBash)
                     break
                 }
             }
-            
+
             // Check for WSL
             if (existsSync('C:\\Windows\\System32\\wsl.exe')) {
                 shells.push('wsl.exe')
@@ -137,7 +131,6 @@ export class TerminalManager {
             shells.push('/bin/bash')
             shells.push('/bin/zsh')
         }
-        console.log('Detected shells:', shells)
         return shells
     }
 }

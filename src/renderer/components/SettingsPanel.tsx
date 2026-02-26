@@ -118,7 +118,6 @@ export default function SettingsPanel() {
         console.log('[SettingsPanel] Requesting deletion for:', modelPath)
         if (confirm('Are you sure you want to delete this model?')) {
             const result = await window.electronAPI.deleteModel(modelPath)
-            console.log('[SettingsPanel] Deletion result:', result)
             if (result.success) {
                 if (local.modelsDirectory) {
                     scanModels(local.modelsDirectory)

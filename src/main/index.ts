@@ -65,9 +65,7 @@ function loadSettings(): AppSettings {
             const data = readFileSync(SETTINGS_PATH, 'utf-8')
             return { ...getDefaultSettings(), ...JSON.parse(data) }
         }
-    } catch (e) {
-        console.error('Failed to load settings:', e)
-    }
+    } catch (e) { /* ignore */ }
     return getDefaultSettings()
 }
 
@@ -76,9 +74,7 @@ function saveSettings(settings: AppSettings): void {
         const dir = join(app.getPath('userData'))
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
         writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2))
-    } catch (e) {
-        console.error('Failed to save settings:', e)
-    }
+    } catch (e) { /* ignore */ }
 }
 
 function createWindow(): void {
@@ -271,19 +267,13 @@ function setupIPC(): void {
                                     results.push({ file: fullPath, line: i + 1, content: lines[i].trim().substring(0, 200) })
                                 }
                             }
-                        } catch (err) {
-                            console.error(`Error reading file ${fullPath}:`, err)
-                        }
+                        } catch (err) { /* skip unreadable files */ }
                     }
                 }
-            } catch (err) {
-                console.error(`Error reading dir ${dirPath}:`, err)
-            }
+            } catch (err) { /* skip unreadable dirs */ }
         }
 
-        console.log(`Starting search for '${query}' in directory: ${dir}`)
         searchDir(dir)
-        console.log(`Search complete. Found ${results.length} results.`)
         return results
     })
 
@@ -449,7 +439,6 @@ function setupIPC(): void {
     ipcMain.handle('models:delete', async (_event, filePath: string) => {
         // Check if this model is currently running
         if (aiService.getStatus().running && aiService.currentModelPath === filePath) {
-            console.log('[Main] Deleting active model, stopping server first...')
             await aiService.stop()
         }
         return modelDownloader.deleteModel(filePath)

@@ -135,11 +135,8 @@ export default function ChatPanel() {
         if (!state.settings.modelsDirectory) return
         try {
             const found = await window.electronAPI.scanLocalModels(state.settings.modelsDirectory)
-            console.log('[ChatPanel] loadModels:', state.settings.modelsDirectory, 'found:', found)
             setModels(found)
-        } catch (err) {
-            console.error('[ChatPanel] loadModels error:', err)
-        }
+        } catch (err) { /* ignore */ }
     }
 
     const currentModelName = state.settings.modelPath
@@ -155,18 +152,25 @@ export default function ChatPanel() {
         setShowModelDropdown(false)
         setSwitchingModel(true)
 
+        // Update settings immediately so the UI reflects the change
         const newSettings = { ...state.settings, modelPath }
         await window.electronAPI.saveSettings(newSettings)
         dispatch({ type: 'SET_SETTINGS', settings: newSettings })
 
-        await window.electronAPI.stopAIServer()
-        // Brief delay to ensure port is released on Windows
-        await new Promise(r => setTimeout(r, 500))
-        const result = await window.electronAPI.startAIServer()
-        setSwitchingModel(false)
-
-        if (!result.success) {
-            alert('Failed to start model: ' + result.error)
+        // Restart server in background — don't await the full health check
+        try {
+            await window.electronAPI.stopAIServer()
+            // Fire and forget: start server, update UI when done
+            window.electronAPI.startAIServer().then((result) => {
+                setSwitchingModel(false)
+                if (!result.success) {
+                    dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
+                } else {
+                    dispatch({ type: 'SET_AI_STATUS', status: 'connected' })
+                }
+            })
+        } catch {
+            setSwitchingModel(false)
         }
     }
 
@@ -237,9 +241,7 @@ export default function ChatPanel() {
                     if (result.success) {
                         mentionedContent += `\nFile: ${matchedFile}\n\`\`\`\n${result.content}\n\`\`\`\n`
                     }
-                } catch (e) {
-                    console.error('Failed to read mentioned file:', matchedFile, e)
-                }
+                } catch (e) { /* skip unreadable files */ }
             }
         }
 
@@ -256,11 +258,8 @@ export default function ChatPanel() {
                     if (snippets && snippets.length > 0) {
                         const references = snippets.map((s: any) => `File: ${s.id}\n${s.content}`).join('\n\n')
                         context += `\n\nRelevant Code Snippets:\n${references}`
-                        console.log('RAG Retrieved:', snippets.length, 'snippets')
                     }
-                } catch (e) {
-                    console.error('RAG Retrieval failed:', e)
-                }
+                } catch (e) { /* RAG retrieval failed silently */ }
             }
         }
 
@@ -493,9 +492,7 @@ export default function ChatPanel() {
                     }
                 })
             }
-        } catch (err) {
-            console.error('Failed to analyze codebase:', err)
-        }
+        } catch (err) { /* ignore */ }
         setAnalyzing(false)
     }
 
@@ -512,9 +509,7 @@ export default function ChatPanel() {
                 if (result.success && result.summary) {
                     setCodebaseContext(result.summary)
                 }
-            } catch (err) {
-                console.error('[ChatPanel] Auto-analyze failed:', err)
-            }
+            } catch (err) { /* ignore */ }
         }
         autoAnalyze()
     }, [state.projectPath])
@@ -536,9 +531,6 @@ export default function ChatPanel() {
             targetPath = `${state.projectPath}/${cleanPath}`.replace(/\\/g, '/')
         }
 
-        console.log('[applyFileAction] action.path:', action.path)
-        console.log('[applyFileAction] state.projectPath:', state.projectPath)
-        console.log('[applyFileAction] Resolved targetPath:', targetPath)
 
         try {
             let result: { success: boolean; error?: string }

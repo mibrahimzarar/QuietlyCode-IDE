@@ -33,14 +33,14 @@ export default function Sidebar() {
 
     async function toggleDir(path: string, node?: FileTreeNode) {
         const isExpanding = !expandedDirs.has(path)
-        
+
         setExpandedDirs(prev => {
             const next = new Set(prev)
             if (next.has(path)) next.delete(path)
             else next.add(path)
             return next
         })
-        
+
         // If expanding a directory with ignored status and no children loaded yet
         if (isExpanding && node?.gitStatus === 'ignored' && (!node.children || node.children.length === 0)) {
             const children = await window.electronAPI.expandDirectory(path)
@@ -139,9 +139,7 @@ export default function Sidebar() {
         if (!searchQuery.trim() || !state.projectPath) return
         setIsSearching(true)
         try {
-            console.log('Searching for:', searchQuery.trim(), 'in', state.projectPath)
             const results = await window.electronAPI.searchInFiles(state.projectPath, searchQuery.trim())
-            console.log('Search results:', results)
             setSearchResults(results)
         } catch (err) {
             console.error('Search failed:', err)

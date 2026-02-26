@@ -7,6 +7,9 @@ import EditPalette from './EditPalette'
 import FindWidget from './FindWidget'
 import HoverTooltip from './HoverTooltip'
 
+// Track inline completion provider to prevent leak on remount
+let inlineProviderDisposable: any = null
+
 interface EditorProps {
     isSecondary?: boolean
 }
@@ -23,7 +26,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
     } | null>(null)
     const [isGeneratingEdit, setIsGeneratingEdit] = useState(false)
 
-    const activeFile = isSecondary 
+    const activeFile = isSecondary
         ? state.openFiles.find(f => f.path === state.splitEditor.secondaryFilePath)
         : state.openFiles.find(f => f.path === state.activeFilePath)
 
@@ -144,7 +147,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
             contextMenuOrder: 1.5,
             run: async () => {
                 if (!activeFile || !state.projectPath) return
-                
+
                 const result = await window.electronAPI.formatDocument(activeFile.path, state.projectPath)
                 if (result.success && result.content !== undefined) {
                     // Update editor content
@@ -154,8 +157,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                         dispatch({ type: 'UPDATE_FILE_CONTENT', path: activeFile.path, content: result.content })
                     }
                 } else if (result.error) {
-                    console.error('Format failed:', result.error)
-                    // Optionally show a notification
+                    // Format failed silently
                 }
             }
         })
@@ -170,20 +172,20 @@ export default function Editor({ isSecondary = false }: EditorProps) {
             run: async () => {
                 const position = editor.getPosition()
                 if (!position || !activeFile) return
-                
+
                 try {
                     const result = await window.electronAPI.getDefinition(
                         activeFile.path,
                         position.lineNumber - 1,
                         position.column - 1
                     )
-                    
+
                     if (result) {
                         const locations = Array.isArray(result) ? result : [result]
                         if (locations.length > 0) {
                             const loc = locations[0]
                             const filePath = loc.uri.replace('file://', '')
-                            
+
                             // Open the file if different
                             if (filePath !== activeFile.path) {
                                 const fileResult = await window.electronAPI.readFile(filePath)
@@ -209,7 +211,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                                     })
                                 }
                             }
-                            
+
                             // Navigate to position
                             setTimeout(() => {
                                 editor.setPosition({
@@ -224,7 +226,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                         }
                     }
                 } catch (error) {
-                    console.log('Definition not available')
+                    // Definition not available
                 }
             }
         })
@@ -240,10 +242,6 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                     const result = await window.electronAPI.writeFile(activeFile.path, content)
                     if (result.success) {
                         dispatch({ type: 'MARK_FILE_SAVED', path: activeFile.path })
-                        if (state.projectPath) {
-                            const tree = await window.electronAPI.getFileTree(state.projectPath)
-                            dispatch({ type: 'SET_FILE_TREE', tree })
-                        }
                     }
                 }
             }
@@ -307,7 +305,9 @@ export default function Editor({ isSecondary = false }: EditorProps) {
 
         // Setup Inline Autocomplete (Ghost text)
         let debounceTimer: NodeJS.Timeout
-        const provider = monaco.languages.registerInlineCompletionsProvider('*', {
+        // Dispose previous provider to prevent leak on remount
+        if (inlineProviderDisposable) inlineProviderDisposable.dispose()
+        inlineProviderDisposable = monaco.languages.registerInlineCompletionsProvider('*', {
             provideInlineCompletions: async (model, position, context, token) => {
                 // Only trigger occasionally if user stopped typing to avoid spamming the local LLM
                 return new Promise((resolve) => {
@@ -367,7 +367,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                                 }
                             }
                         } catch (err) {
-                            console.error('Autocomplete failed:', err)
+                            // Autocomplete failed silently
                         }
 
                         resolve({ items: [] })
@@ -451,9 +451,9 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                 <>
                     <FindWidget editor={editorRef.current} monaco={monacoRef.current} />
                     {activeFile && (
-                        <HoverTooltip 
-                            editor={editorRef.current} 
-                            monaco={monacoRef.current} 
+                        <HoverTooltip
+                            editor={editorRef.current}
+                            monaco={monacoRef.current}
                             filePath={activeFile.path}
                         />
                     )}

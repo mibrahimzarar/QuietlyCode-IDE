@@ -263,22 +263,18 @@ class AIService {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: binaryDir
       });
-      console.log("[AI Service] Spawning:", config.binaryPath, "CWD:", binaryDir, "Port:", config.port, "Model:", config.modelPath, "Embeddings: Enabled");
       let stderrOutput = "";
+      const MAX_STDERR = 5e3;
       this.process.stderr?.on("data", (data) => {
-        const text = data.toString();
-        stderrOutput += text;
-        console.log("[llama-server]", text);
+        stderrOutput = (stderrOutput + data.toString()).slice(-MAX_STDERR);
       });
       let earlyExit = false;
       let exitCode = null;
-      this.process.on("error", (err) => {
-        console.error("AI server error:", err);
+      this.process.on("error", () => {
         earlyExit = true;
         this.isRunning = false;
       });
       this.process.on("exit", (code) => {
-        console.log("AI server exited with code:", code);
         exitCode = code;
         earlyExit = true;
         this.isRunning = false;
@@ -296,7 +292,6 @@ class AIService {
         return { success: false, error: "Server failed to start within 30s timeout. Check that the binary and model are valid." };
       }
     } catch (err) {
-      console.error("[AI Service] Start failed:", err);
       return { success: false, error: `Failed to spawn process: ${err.message}` };
     }
   }
@@ -312,7 +307,7 @@ class AIService {
           } catch {
           }
           resolve();
-        }, 5e3);
+        }, 2e3);
         proc.on("exit", () => {
           clearTimeout(timeout);
           resolve();
@@ -339,15 +334,15 @@ class AIService {
           if (res.statusCode === 200) {
             resolve(true);
           } else {
-            setTimeout(check, 500);
+            setTimeout(check, 200);
           }
         });
         req.on("error", () => {
-          setTimeout(check, 500);
+          setTimeout(check, 200);
         });
-        req.setTimeout(2e3, () => {
+        req.setTimeout(1e3, () => {
           req.destroy();
-          setTimeout(check, 500);
+          setTimeout(check, 200);
         });
       };
       check();
@@ -1065,7 +1060,6 @@ class TerminalManager {
     this.window = window;
   }
   createSession(id, shell, cwd) {
-    console.log("TerminalManager.createSession called with shell:", shell);
     try {
       const isWin = os.platform() === "win32";
       let shellCmd = shell || "powershell.exe";
@@ -1106,7 +1100,6 @@ class TerminalManager {
       });
       return { success: true };
     } catch (err) {
-      console.error("Failed to create terminal session:", err);
       return { success: false, error: err.message };
     }
   }
@@ -1122,7 +1115,6 @@ class TerminalManager {
       try {
         session.pty.resize(cols, rows);
       } catch (e) {
-        console.error("PTY resize error:", e);
       }
     }
   }
@@ -1148,10 +1140,8 @@ class TerminalManager {
         process.env.LOCALAPPDATA + "\\Programs\\Git\\bin\\bash.exe",
         process.env.PROGRAMFILES + "\\Git\\bin\\bash.exe"
       ].filter(Boolean);
-      console.log("Checking Git Bash paths:", gitBashPaths);
       for (const gitBash of gitBashPaths) {
         if (fs.existsSync(gitBash)) {
-          console.log("Found Git Bash at:", gitBash);
           shells.push(gitBash);
           break;
         }
@@ -1163,7 +1153,6 @@ class TerminalManager {
       shells.push("/bin/bash");
       shells.push("/bin/zsh");
     }
-    console.log("Detected shells:", shells);
     return shells;
   }
 }
@@ -2252,7 +2241,6 @@ function loadSettings() {
       return { ...getDefaultSettings(), ...JSON.parse(data) };
     }
   } catch (e) {
-    console.error("Failed to load settings:", e);
   }
   return getDefaultSettings();
 }
@@ -2262,7 +2250,6 @@ function saveSettings(settings) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
   } catch (e) {
-    console.error("Failed to save settings:", e);
   }
 }
 function createWindow() {
@@ -2429,17 +2416,13 @@ function setupIPC() {
                 }
               }
             } catch (err) {
-              console.error(`Error reading file ${fullPath}:`, err);
             }
           }
         }
       } catch (err) {
-        console.error(`Error reading dir ${dirPath}:`, err);
       }
     }
-    console.log(`Starting search for '${query}' in directory: ${dir}`);
     searchDir(dir);
-    console.log(`Search complete. Found ${results.length} results.`);
     return results;
   });
   electron.ipcMain.handle("ai:startServer", async (_event) => {
@@ -2586,7 +2569,6 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
   });
   electron.ipcMain.handle("models:delete", async (_event, filePath) => {
     if (aiService.getStatus().running && aiService.currentModelPath === filePath) {
-      console.log("[Main] Deleting active model, stopping server first...");
       await aiService.stop();
     }
     return modelDownloader.deleteModel(filePath);

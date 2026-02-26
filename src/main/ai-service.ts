@@ -43,27 +43,22 @@ export class AIService {
                 cwd: binaryDir
             })
 
-            console.log('[AI Service] Spawning:', config.binaryPath, 'CWD:', binaryDir, 'Port:', config.port, 'Model:', config.modelPath, 'Embeddings: Enabled')
-
-            // Capture stderr for error reporting
+            // Capture stderr for error reporting (ring buffer, max 5000 chars)
             let stderrOutput = ''
+            const MAX_STDERR = 5000
             this.process.stderr?.on('data', (data) => {
-                const text = data.toString()
-                stderrOutput += text
-                console.log('[llama-server]', text)
+                stderrOutput = (stderrOutput + data.toString()).slice(-MAX_STDERR)
             })
 
             // Track early exit
             let earlyExit = false
             let exitCode: number | null = null
-            this.process.on('error', (err) => {
-                console.error('AI server error:', err)
+            this.process.on('error', () => {
                 earlyExit = true
                 this.isRunning = false
             })
 
             this.process.on('exit', (code) => {
-                console.log('AI server exited with code:', code)
                 exitCode = code
                 earlyExit = true
                 this.isRunning = false
@@ -83,7 +78,6 @@ export class AIService {
                 return { success: false, error: 'Server failed to start within 30s timeout. Check that the binary and model are valid.' }
             }
         } catch (err: any) {
-            console.error('[AI Service] Start failed:', err)
             return { success: false, error: `Failed to spawn process: ${err.message}` }
         }
     }
@@ -98,7 +92,7 @@ export class AIService {
                 const timeout = setTimeout(() => {
                     try { proc.kill('SIGKILL') } catch { }
                     resolve()
-                }, 5000)
+                }, 2000)
 
                 proc.on('exit', () => {
                     clearTimeout(timeout)
@@ -127,17 +121,17 @@ export class AIService {
                     if (res.statusCode === 200) {
                         resolve(true)
                     } else {
-                        setTimeout(check, 500)
+                        setTimeout(check, 200)
                     }
                 })
 
                 req.on('error', () => {
-                    setTimeout(check, 500)
+                    setTimeout(check, 200)
                 })
 
-                req.setTimeout(2000, () => {
+                req.setTimeout(1000, () => {
                     req.destroy()
-                    setTimeout(check, 500)
+                    setTimeout(check, 200)
                 })
             }
             check()
