@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../store/appStore'
-import { Terminal as TerminalIcon, Plus, X, Maximize2, Minimize2, SplitSquareHorizontal, ChevronDown, Bot, ChevronUp } from 'lucide-react'
+import { Plus, X, Maximize2, Minimize2, ChevronDown, Bot, ChevronUp } from 'lucide-react'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 // @ts-ignore
@@ -89,7 +89,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
     // Handle Resize
     useEffect(() => {
         let resizeTimeout: NodeJS.Timeout | null = null
-        
+
         const resizeObserver = new ResizeObserver((entries) => {
             // Debounce resize events
             if (resizeTimeout) clearTimeout(resizeTimeout)
@@ -108,9 +108,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                                     if (cols > 0 && rows > 0) {
                                         window.electronAPI.resizeTerminal(s.id, cols, rows)
                                     }
-                                } catch (e) { 
-                                    console.error('Resize error:', e)
-                                }
+                                } catch (e) { /* ignore resize errors */ }
                             }
                         }
                     })
@@ -143,24 +141,23 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
     // Close dropdown when clicking outside
     useEffect(() => {
         if (!showShellDropdown) return
-        
+
         const handleClickOutside = (e: MouseEvent) => {
             const target = e.target as HTMLElement
             // Check if click is inside the shell selector OR the portal dropdown
             const isInsideSelector = shellSelectorRef.current?.contains(target)
             const isInsidePortal = target.closest('.shell-dropdown-portal')
-            
+
             if (!isInsideSelector && !isInsidePortal) {
                 setShowShellDropdown(false)
             }
         }
-        
+
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [showShellDropdown])
 
     function createNewSession() {
-        console.log('createNewSession called, shellRef.current:', shellRef.current)
         const id = `term-${Date.now()}`
         const newSession: TerminalSession = {
             id,
@@ -221,7 +218,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
 
         const fitAddon = new FitAddon()
         term.loadAddon(fitAddon)
-        
+
         // Create a container for xterm
         const xtermContainer = document.createElement('div')
         xtermContainer.style.width = '100%'
@@ -229,7 +226,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         xtermContainer.style.position = 'relative'
         xtermContainer.style.overflow = 'hidden'
         session.containerRef.current.appendChild(xtermContainer)
-        
+
         term.open(xtermContainer)
 
         // Force font antialiasing
@@ -247,9 +244,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                 if (term.cols && term.rows) {
                     window.electronAPI.resizeTerminal(session.id, term.cols, term.rows)
                 }
-            } catch (e) {
-                console.error('Failed to fit terminal:', e)
-            }
+            } catch (e) { /* ignore fit errors */ }
         })
 
         term.onData((data) => {
@@ -278,17 +273,16 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         term.onSelectionChange(() => {
             const selection = term.getSelection()
             if (selection) {
-                // Get selection position for floating button
-                const terminalElement = session.containerRef.current
-                if (terminalElement) {
-                    const selectionRect = window.getSelection()?.getRangeAt(0).getBoundingClientRect()
-                    if (selectionRect) {
-                        setSelection({
-                            text: selection,
-                            x: selectionRect.left + selectionRect.width / 2,
-                            y: selectionRect.top - 10
-                        })
-                    }
+                // xterm renders to canvas, so window.getSelection() won't work.
+                // Position the popup at the top-center of the terminal container.
+                const container = session.containerRef.current
+                if (container) {
+                    const rect = container.getBoundingClientRect()
+                    setSelection({
+                        text: selection,
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + 8
+                    })
                 }
             } else {
                 setSelection(null)
@@ -300,7 +294,6 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         session.fitAddon = fitAddon
 
         // Create backend process
-        console.log('Creating terminal with shell:', shellRef.current)
         await window.electronAPI.createTerminal(session.id, shellRef.current, state.projectPath || '')
 
         term.focus()
@@ -339,11 +332,11 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
         return parts[parts.length - 1].replace('.exe', '')
     }
 
-    const activeSession = sessions.find(s => s.id === activeSessionId)
+
 
     // Dropdown portal component
     const dropdownPortal = showShellDropdown ? createPortal(
-        <div 
+        <div
             className="shell-dropdown-portal"
             style={{
                 position: 'fixed',
@@ -370,7 +363,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                         setShell(s)
                         shellRef.current = s
                         setShowShellDropdown(false)
-                        
+
                         // Auto-create new terminal with selected shell if different
                         if (s !== previousShell) {
                             setTimeout(() => createNewSession(), 100)
@@ -401,10 +394,10 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                     <button className="toolbar-btn" onClick={createNewSession} title="New Terminal">
                         <Plus size={14} />
                     </button>
-                    
+
                     {/* Shell selector dropdown */}
                     <div className="shell-selector" ref={shellSelectorRef}>
-                        <button 
+                        <button
                             className="shell-selector-btn"
                             onClick={() => setShowShellDropdown(!showShellDropdown)}
                             title="Select Shell"
@@ -465,7 +458,7 @@ export default function TerminalPanel({ isMaximized, onToggleMaximize }: Termina
                     </div>
                 )}
             </div>
-            
+
             {/* Render dropdown via portal */}
             {dropdownPortal}
         </div>

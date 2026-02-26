@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron'
 import { join, dirname, basename, extname } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, renameSync, readdirSync, statSync, rmSync } from 'fs'
 import { exec } from 'child_process'
@@ -90,6 +90,7 @@ function createWindow(): void {
         frame: false,
         titleBarStyle: 'hidden',
         backgroundColor: '#0a0a0f',
+        icon: nativeImage.createFromPath(join(__dirname, '../../assets/images/1.png')),
         webPreferences: {
             preload: join(__dirname, '../preload/index.js'),
             nodeIntegration: false,

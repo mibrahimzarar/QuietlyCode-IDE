@@ -31,6 +31,7 @@ const https = require("https");
 const axios = require("axios");
 const AdmZip = require("adm-zip");
 const os = require("os");
+const pty = require("node-pty");
 const crypto = require("crypto");
 const node = require("vscode-jsonrpc/node");
 const events = require("events");
@@ -52,6 +53,7 @@ function _interopNamespaceDefault(e) {
 }
 const path__namespace = /* @__PURE__ */ _interopNamespaceDefault(path);
 const fs__namespace = /* @__PURE__ */ _interopNamespaceDefault(fs);
+const pty__namespace = /* @__PURE__ */ _interopNamespaceDefault(pty);
 const IGNORED_DIRS = /* @__PURE__ */ new Set([
   ".git",
   ".svn",
@@ -1084,30 +1086,23 @@ class TerminalManager {
       } else {
         shellCmd = shell || "/bin/bash";
       }
-      const terminalProcess = child_process.spawn(shellCmd, shellArgs, {
-        cwd,
-        env: { ...process.env, TERM: "xterm-256color" },
-        shell: false
+      const ptyProcess = pty__namespace.spawn(shellCmd, shellArgs, {
+        name: "xterm-256color",
+        cols: 80,
+        rows: 24,
+        cwd: cwd || process.cwd(),
+        env: process.env
       });
-      const normalizeOutput = (data) => {
-        let str = data.toString();
-        return str.replace(/\r?\n/g, "\r\n");
-      };
-      terminalProcess.stdout.on("data", (data) => {
-        this.window?.webContents.send("terminal:data", { id, data: normalizeOutput(data) });
+      ptyProcess.onData((data) => {
+        this.window?.webContents.send("terminal:data", { id, data });
       });
-      terminalProcess.stderr.on("data", (data) => {
-        const normalized = normalizeOutput(data);
-        this.window?.webContents.send("terminal:data", { id, data: `\x1B[31m${normalized}\x1B[0m` });
-      });
-      terminalProcess.on("exit", (code) => {
-        this.window?.webContents.send("terminal:exit", { id, code: code || 0 });
+      ptyProcess.onExit(({ exitCode }) => {
+        this.window?.webContents.send("terminal:exit", { id, code: exitCode });
         this.sessions.delete(id);
       });
       this.sessions.set(id, {
         id,
-        process: terminalProcess,
-        history: ""
+        pty: ptyProcess
       });
       return { success: true };
     } catch (err) {
@@ -1118,15 +1113,23 @@ class TerminalManager {
   write(id, data) {
     const session = this.sessions.get(id);
     if (session) {
-      session.process.stdin.write(data);
+      session.pty.write(data);
     }
   }
   resize(id, cols, rows) {
+    const session = this.sessions.get(id);
+    if (session && cols > 0 && rows > 0) {
+      try {
+        session.pty.resize(cols, rows);
+      } catch (e) {
+        console.error("PTY resize error:", e);
+      }
+    }
   }
   kill(id) {
     const session = this.sessions.get(id);
     if (session) {
-      session.process.kill();
+      session.pty.kill();
       this.sessions.delete(id);
     }
   }
@@ -2271,6 +2274,7 @@ function createWindow() {
     frame: false,
     titleBarStyle: "hidden",
     backgroundColor: "#0a0a0f",
+    icon: electron.nativeImage.createFromPath(path.join(__dirname, "../../assets/images/1.png")),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       nodeIntegration: false,
