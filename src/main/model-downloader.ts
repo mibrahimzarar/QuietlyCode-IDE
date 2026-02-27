@@ -377,6 +377,14 @@ export class ModelDownloader {
                     return
                 }
 
+                let parsedUrl: URL
+                try {
+                    parsedUrl = new URL(requestUrl)
+                } catch {
+                    reject(new Error(`Invalid URL: ${requestUrl}`))
+                    return
+                }
+
                 const options: any = {
                     headers: {}
                 }
@@ -385,11 +393,19 @@ export class ModelDownloader {
                     options.headers['Range'] = `bytes=${resumeBytes}-`
                 }
 
-                const protocol = requestUrl.startsWith('https') ? https : http
+                const protocol = parsedUrl.protocol === 'https:' ? https : http
                 const req = protocol.get(requestUrl, options, (res) => {
                     // Handle redirects
                     if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                        makeRequest(res.headers.location, redirectCount + 1)
+                        // Resolve relative redirect URLs against the current request URL
+                        let redirectUrl: string
+                        try {
+                            redirectUrl = new URL(res.headers.location, requestUrl).href
+                        } catch {
+                            reject(new Error(`Invalid redirect URL: ${res.headers.location}`))
+                            return
+                        }
+                        makeRequest(redirectUrl, redirectCount + 1)
                         return
                     }
 

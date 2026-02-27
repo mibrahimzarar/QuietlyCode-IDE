@@ -616,7 +616,7 @@ export default function ChatPanel() {
                         </div>
                         <div className="chat-message-body">
                             <span className={`chat-message-role ${msg.role}`}>
-                                {msg.role === 'user' ? 'You' : 'BitNet AI'}
+                                {msg.role === 'user' ? 'You' : 'QuietlyCode AI'}
                             </span>
                             <div className="chat-message-content">
                                 {renderContent(msg.id, msg.content, fileActions, applyFileAction, rejectFileAction)}

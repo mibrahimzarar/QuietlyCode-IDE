@@ -1,5 +1,6 @@
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { existsSync } from 'fs'
+import { readFile, writeFile } from 'fs/promises'
 import { app } from 'electron'
 
 interface Document {
@@ -13,20 +14,23 @@ interface Document {
 export class VectorStore {
     private documents: Document[] = []
     private storagePath: string
+    private initPromise: Promise<void>
 
     constructor() {
         const userDataPath = app.getPath('userData')
         this.storagePath = join(userDataPath, 'rag-store.json')
-        this.load()
+        this.initPromise = this.load()
     }
 
-    add(doc: Document) {
+    async add(doc: Document) {
+        await this.initPromise
         // Remove existing if duplicate ID
         this.documents = this.documents.filter(d => d.id !== doc.id)
         this.documents.push(doc)
     }
 
     async search(queryEmbedding: number[], limit: number = 5): Promise<(Document & { score: number })[]> {
+        await this.initPromise
         const results = this.documents.map(doc => ({
             ...doc,
             score: this.cosineSimilarity(queryEmbedding, doc.embedding)
@@ -37,18 +41,19 @@ export class VectorStore {
             .slice(0, limit)
     }
 
-    save() {
+    async save() {
+        await this.initPromise
         try {
-            writeFileSync(this.storagePath, JSON.stringify(this.documents), 'utf-8')
+            await writeFile(this.storagePath, JSON.stringify(this.documents), 'utf-8')
         } catch (err) {
             console.error('Failed to save Vector Store:', err)
         }
     }
 
-    load() {
+    async load() {
         if (existsSync(this.storagePath)) {
             try {
-                const data = readFileSync(this.storagePath, 'utf-8')
+                const data = await readFile(this.storagePath, 'utf-8')
                 this.documents = JSON.parse(data)
             } catch (err) {
                 console.error('Failed to load Vector Store:', err)
@@ -57,12 +62,14 @@ export class VectorStore {
         }
     }
 
-    clear() {
+    async clear() {
+        await this.initPromise
         this.documents = []
-        this.save()
+        await this.save()
     }
 
-    getStats() {
+    async getStats() {
+        await this.initPromise
         return {
             count: this.documents.length,
             path: this.storagePath

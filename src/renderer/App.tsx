@@ -15,6 +15,7 @@ import TerminalPanel from './components/TerminalPanel'
 import ProblemsPanel from './components/ProblemsPanel'
 import QuickOpen from './components/QuickOpen'
 import DebugPanel from './components/DebugPanel'
+import StandaloneChat from './components/StandaloneChat'
 
 export default function App() {
     const { state, dispatch } = useApp()
@@ -25,6 +26,7 @@ export default function App() {
     const toggleBottomPanelMaximized = useCallback(() => {
         setIsBottomPanelMaximized(prev => !prev)
     }, [])
+
 
     // Performance optimization: debounce project-wide linting
     const runLinting = useCallback(async () => {
@@ -44,19 +46,27 @@ export default function App() {
 
     // Load settings and restore session on mount
     useEffect(() => {
-        async function init() {
+        async function initApp() {
             try {
                 const settings = await window.electronAPI.getSettings()
                 dispatch({ type: 'SET_SETTINGS', settings })
 
                 // Check if this is a returning user (setupComplete with valid paths)
-                const isReturningUser = settings.setupComplete && 
-                    settings.modelPath && 
+                const isReturningUser = settings.setupComplete &&
+                    settings.modelPath &&
                     settings.serverBinaryPath
 
                 if (isReturningUser) {
                     // Returning user - go directly to IDE
                     dispatch({ type: 'SET_SCREEN', screen: 'ide' })
+
+                    // Restore chat history
+                    if (settings.chatMessages && settings.chatMessages.length > 0) {
+                        dispatch({ type: 'SET_CHAT_MESSAGES', messages: settings.chatMessages })
+                    }
+                    if (settings.standaloneChatSessions && settings.standaloneChatSessions.length > 0) {
+                        dispatch({ type: 'SET_STANDALONE_CHAT_SESSIONS', sessions: settings.standaloneChatSessions })
+                    }
 
                     // Restore session
                     if (settings.lastProjectPath) {
@@ -94,20 +104,33 @@ export default function App() {
                             dispatch({ type: 'SET_ACTIVE_FILE', path: settings.lastActiveFile })
                         }
                     }
+
+                    // Scan models at boot
+                    if (settings.modelsDirectory) {
+                        window.electronAPI.scanLocalModels(settings.modelsDirectory).catch(() => { })
+                    }
+
+                    // Start AI server immediately
+                    dispatch({ type: 'SET_AI_STATUS', status: 'connecting' })
+                    try {
+                        const aiResult = await window.electronAPI.startAIServer()
+                        dispatch({ type: 'SET_AI_STATUS', status: aiResult.success ? 'connected' : 'disconnected' })
+                    } catch {
+                        dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
+                    }
                 } else {
-                    // New user - show setup/welcome screen
                     dispatch({ type: 'SET_SCREEN', screen: 'setup' })
+                    dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
                 }
-            } catch (e) {
-                console.error('Failed to load settings:', e)
-                // On error, show setup screen
+            } catch (error) {
+                console.error('Failed to init app:', error)
                 dispatch({ type: 'SET_SCREEN', screen: 'setup' })
+                dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
             } finally {
-                // Small delay for elegant transition
-                setTimeout(() => setIsInitializing(false), 800)
+                setIsInitializing(false)
             }
         }
-        init()
+        initApp()
     }, [])
 
     // Save session when it changes
@@ -116,16 +139,20 @@ export default function App() {
             const lastProjectPath = state.projectPath
             const lastOpenFiles = state.openFiles.map(f => f.path)
             const lastActiveFile = state.activeFilePath
+            const chatMessages = state.chatMessages
+            const standaloneChatSessions = state.standaloneChatSessions
 
             window.electronAPI.saveSettings({
                 lastProjectPath,
                 lastOpenFiles,
-                lastActiveFile
+                lastActiveFile,
+                chatMessages,
+                standaloneChatSessions
             }).catch(err => {
                 console.error('Failed to save session settings:', err)
             })
         }
-    }, [state.projectPath, state.openFiles.length, state.activeFilePath, state.screen])
+    }, [state.projectPath, state.openFiles.length, state.activeFilePath, state.chatMessages, state.standaloneChatSessions, state.screen])
 
     // Apply theme
     useEffect(() => {
@@ -278,66 +305,76 @@ export default function App() {
                     {state.screen === 'setup' ? (
                         <SetupScreen />
                     ) : state.screen === 'ide' ? (
-                        <div className="main-layout">
-                            {state.sidebarVisible && <Sidebar />}
-                            <div className="editor-area">
-                                <div className={`editor-main ${state.splitEditor.enabled ? 'split' : ''}`}>
-                                    <TabBar />
-                                    <div className="editor-content">
-                                        <Editor isSecondary={false} />
-                                        {state.splitEditor.enabled && (
-                                            <Editor isSecondary={true} />
-                                        )}
-                                    </div>
-                                </div>
-
-                                {state.terminalVisible && (
-                                    <div className={`bottom-panel-container ${isBottomPanelMaximized ? 'maximized' : ''}`}>
-                                        <div className="bottom-panel-tabs">
-                                            <div
-                                                className={`bottom-tab ${bottomTab === 'terminal' ? 'active' : ''}`}
-                                                onClick={() => setBottomTab('terminal')}
-                                            >
-                                                TERMINAL
-                                            </div>
-                                            <div
-                                                className={`bottom-tab ${bottomTab === 'problems' ? 'active' : ''}`}
-                                                onClick={() => setBottomTab('problems')}
-                                            >
-                                                PROBLEMS
-                                                {state.problems.length > 0 && (
-                                                    <span className="bottom-tab-badge">{state.problems.length}</span>
+                        <>
+                            {state.viewMode === 'ide' ? (
+                                <div className="main-layout">
+                                    {state.sidebarVisible && <Sidebar />}
+                                    <div className="editor-area">
+                                        <div className={`editor-main ${state.splitEditor.enabled ? 'split' : ''}`}>
+                                            <TabBar />
+                                            <div className="editor-content">
+                                                <Editor isSecondary={false} />
+                                                {state.splitEditor.enabled && (
+                                                    <Editor isSecondary={true} />
                                                 )}
                                             </div>
-                                            <div
-                                                className={`bottom-tab ${bottomTab === 'debug' ? 'active' : ''}`}
-                                                onClick={() => setBottomTab('debug')}
-                                            >
-                                                DEBUG
+                                        </div>
+
+                                        {state.terminalVisible && (
+                                            <div className={`bottom-panel-container ${isBottomPanelMaximized ? 'maximized' : ''}`}>
+                                                <div className="bottom-panel-tabs">
+                                                    <div
+                                                        className={`bottom-tab ${bottomTab === 'terminal' ? 'active' : ''}`}
+                                                        onClick={() => setBottomTab('terminal')}
+                                                    >
+                                                        TERMINAL
+                                                    </div>
+                                                    <div
+                                                        className={`bottom-tab ${bottomTab === 'problems' ? 'active' : ''}`}
+                                                        onClick={() => setBottomTab('problems')}
+                                                    >
+                                                        PROBLEMS
+                                                        {state.problems.length > 0 && (
+                                                            <span className="bottom-tab-badge">{state.problems.length}</span>
+                                                        )}
+                                                    </div>
+                                                    <div
+                                                        className={`bottom-tab ${bottomTab === 'debug' ? 'active' : ''}`}
+                                                        onClick={() => setBottomTab('debug')}
+                                                    >
+                                                        DEBUG
+                                                    </div>
+                                                </div>
+                                                <div className="bottom-panel-content">
+                                                    {bottomTab === 'terminal' && (
+                                                        <TerminalPanel
+                                                            isMaximized={isBottomPanelMaximized}
+                                                            onToggleMaximize={toggleBottomPanelMaximized}
+                                                        />
+                                                    )}
+                                                    {bottomTab === 'problems' && (
+                                                        <ProblemsPanel
+                                                            isMaximized={isBottomPanelMaximized}
+                                                            onToggleMaximize={toggleBottomPanelMaximized}
+                                                        />
+                                                    )}
+                                                    {bottomTab === 'debug' && (
+                                                        <DebugPanel />
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div className="bottom-panel-content">
-                                            {bottomTab === 'terminal' && (
-                                                <TerminalPanel
-                                                    isMaximized={isBottomPanelMaximized}
-                                                    onToggleMaximize={toggleBottomPanelMaximized}
-                                                />
-                                            )}
-                                            {bottomTab === 'problems' && (
-                                                <ProblemsPanel
-                                                    isMaximized={isBottomPanelMaximized}
-                                                    onToggleMaximize={toggleBottomPanelMaximized}
-                                                />
-                                            )}
-                                            {bottomTab === 'debug' && (
-                                                <DebugPanel />
-                                            )}
-                                        </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                            {state.chatPanelVisible && <ChatPanel />}
-                        </div>
+                                    {state.chatPanelVisible && <ChatPanel />}
+                                </div>
+                            ) : (
+                                <div className="main-layout chat-mode-layout">
+                                    <div className="editor-area standalone-chat-area">
+                                        <StandaloneChat />
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     ) : null}
                     <StatusBar />
 

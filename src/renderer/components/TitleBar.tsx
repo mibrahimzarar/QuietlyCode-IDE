@@ -28,18 +28,35 @@ export default function TitleBar() {
             <div className="titlebar-logo">
                 <img src="./assets/logo.jpg" alt="QuietlyCode" className="titlebar-logo-img" />
                 <span>QuietlyCode</span>
+
+                {state.screen === 'ide' && (
+                    <div className="titlebar-menu" style={{ marginLeft: '12px' }}>
+                        <button
+                            className={`titlebar-menu-btn ${state.terminalVisible ? 'active' : ''}`}
+                            onClick={() => dispatch({ type: 'TOGGLE_TERMINAL' })}
+                            title="Toggle Terminal (Ctrl+`)"
+                        >
+                            <Terminal size={14} />
+                            <span>Terminal</span>
+                        </button>
+                    </div>
+                )}
             </div>
 
-            {/* IDE menu buttons - only show in IDE mode */}
+            {/* IDE / Chat Toggle (Center) */}
             {state.screen === 'ide' && (
-                <div className="titlebar-menu">
+                <div className="view-mode-toggle">
                     <button
-                        className={`titlebar-menu-btn ${state.terminalVisible ? 'active' : ''}`}
-                        onClick={() => dispatch({ type: 'TOGGLE_TERMINAL' })}
-                        title="Toggle Terminal (Ctrl+`)"
+                        className={`view-mode-btn ${state.viewMode === 'ide' ? 'active' : ''}`}
+                        onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: 'ide' })}
                     >
-                        <Terminal size={14} />
-                        <span>Terminal</span>
+                        IDE
+                    </button>
+                    <button
+                        className={`view-mode-btn ${state.viewMode === 'chat' ? 'active' : ''}`}
+                        onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: 'chat' })}
+                    >
+                        Chat
                     </button>
                 </div>
             )}

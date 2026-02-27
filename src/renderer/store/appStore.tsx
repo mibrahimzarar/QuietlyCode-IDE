@@ -24,6 +24,13 @@ export interface ChatMessage {
     timestamp: number
 }
 
+export interface ChatSession {
+    id: string
+    title: string
+    messages: ChatMessage[]
+    updatedAt: number
+}
+
 export interface CodeProblem {
     path: string
     message: string
@@ -45,12 +52,16 @@ export interface AppSettings {
     lastProjectPath: string | null
     lastOpenFiles: string[]
     lastActiveFile: string | null
+    chatMessages: ChatMessage[]
+    standaloneChatSessions: ChatSession[]
+    activeStandaloneChatId: string | null
 }
 
 export type AppScreen = 'loading' | 'setup' | 'ide'
 
 export interface AppState {
     screen: AppScreen
+    viewMode: 'ide' | 'chat'
     // File system
     projectPath: string | null
     fileTree: FileTreeNode[]
@@ -59,6 +70,8 @@ export interface AppState {
     // AI
     aiStatus: 'disconnected' | 'connecting' | 'connected'
     chatMessages: ChatMessage[]
+    standaloneChatSessions: ChatSession[]
+    activeStandaloneChatId: string | null
     isStreaming: boolean
     selectedCode: string
     // UI
@@ -101,6 +114,7 @@ export interface ContextMenuItem {
 // --- Actions ---
 type Action =
     | { type: 'SET_SCREEN'; screen: AppScreen }
+    | { type: 'SET_VIEW_MODE'; mode: 'ide' | 'chat' }
     | { type: 'SET_PROJECT'; path: string; tree: FileTreeNode[] }
     | { type: 'SET_FILE_TREE'; tree: FileTreeNode[] }
     | { type: 'OPEN_FILE'; file: OpenFile }
@@ -109,8 +123,17 @@ type Action =
     | { type: 'UPDATE_FILE_CONTENT'; path: string; content: string }
     | { type: 'MARK_FILE_SAVED'; path: string }
     | { type: 'SET_AI_STATUS'; status: 'disconnected' | 'connecting' | 'connected' }
+    | { type: 'SET_CHAT_MESSAGES'; messages: ChatMessage[] }
     | { type: 'ADD_CHAT_MESSAGE'; message: ChatMessage }
     | { type: 'UPDATE_LAST_ASSISTANT_MESSAGE'; content: string }
+    | { type: 'SET_STANDALONE_CHAT_SESSIONS'; sessions: ChatSession[] }
+    | { type: 'ADD_STANDALONE_CHAT_SESSION'; session: ChatSession }
+    | { type: 'SET_ACTIVE_STANDALONE_CHAT'; id: string | null }
+    | { type: 'DELETE_STANDALONE_CHAT_SESSION'; id: string }
+    | { type: 'UPDATE_STANDALONE_CHAT_TITLE'; id: string; title: string }
+    | { type: 'ADD_STANDALONE_CHAT_MESSAGE'; message: ChatMessage }
+    | { type: 'UPDATE_LAST_STANDALONE_ASSISTANT_MESSAGE'; content: string }
+    | { type: 'CLEAR_STANDALONE_CHAT' }
     | { type: 'SET_STREAMING'; isStreaming: boolean }
     | { type: 'SET_SELECTED_CODE'; code: string }
     | { type: 'CLEAR_CHAT' }
@@ -145,17 +168,23 @@ const defaultSettings: AppSettings = {
     setupComplete: false,
     lastProjectPath: null,
     lastOpenFiles: [],
-    lastActiveFile: null
+    lastActiveFile: null,
+    chatMessages: [],
+    standaloneChatSessions: [],
+    activeStandaloneChatId: null
 }
 
 const initialState: AppState = {
     screen: 'loading',
+    viewMode: 'ide',
     projectPath: null,
     fileTree: [],
     openFiles: [],
     activeFilePath: null,
-    aiStatus: 'disconnected',
+    aiStatus: 'connecting',
     chatMessages: [],
+    standaloneChatSessions: [],
+    activeStandaloneChatId: null,
     isStreaming: false,
     selectedCode: '',
     settings: defaultSettings,
@@ -187,6 +216,9 @@ function reducer(state: AppState, action: Action): AppState {
     switch (action.type) {
         case 'SET_SCREEN':
             return { ...state, screen: action.screen }
+
+        case 'SET_VIEW_MODE':
+            return { ...state, viewMode: action.mode }
 
         case 'SET_PROJECT':
             return { ...state, projectPath: action.path, fileTree: action.tree }
@@ -237,6 +269,9 @@ function reducer(state: AppState, action: Action): AppState {
         case 'SET_AI_STATUS':
             return { ...state, aiStatus: action.status }
 
+        case 'SET_CHAT_MESSAGES':
+            return { ...state, chatMessages: action.messages }
+
         case 'ADD_CHAT_MESSAGE':
             return { ...state, chatMessages: [...state.chatMessages, action.message] }
 
@@ -253,6 +288,86 @@ function reducer(state: AppState, action: Action): AppState {
                 messages[lastAssistant] = { ...messages[lastAssistant], content: action.content }
             }
             return { ...state, chatMessages: messages }
+        }
+
+        case 'SET_STANDALONE_CHAT_SESSIONS':
+            return {
+                ...state,
+                standaloneChatSessions: action.sessions,
+                activeStandaloneChatId: action.sessions.length > 0 ? action.sessions[0].id : null
+            }
+
+        case 'ADD_STANDALONE_CHAT_SESSION':
+            return {
+                ...state,
+                standaloneChatSessions: [action.session, ...state.standaloneChatSessions],
+                activeStandaloneChatId: action.session.id
+            }
+
+        case 'SET_ACTIVE_STANDALONE_CHAT':
+            return { ...state, activeStandaloneChatId: action.id }
+
+        case 'DELETE_STANDALONE_CHAT_SESSION': {
+            const sessions = state.standaloneChatSessions.filter(s => s.id !== action.id)
+            let newActiveId = state.activeStandaloneChatId
+            if (newActiveId === action.id) {
+                newActiveId = sessions.length > 0 ? sessions[0].id : null
+            }
+            return { ...state, standaloneChatSessions: sessions, activeStandaloneChatId: newActiveId }
+        }
+
+        case 'UPDATE_STANDALONE_CHAT_TITLE': {
+            const sessions = state.standaloneChatSessions.map(s =>
+                s.id === action.id ? { ...s, title: action.title, updatedAt: Date.now() } : s
+            )
+            return { ...state, standaloneChatSessions: sessions }
+        }
+
+        case 'ADD_STANDALONE_CHAT_MESSAGE': {
+            if (!state.activeStandaloneChatId) return state
+            const sessions = state.standaloneChatSessions.map(s =>
+                s.id === state.activeStandaloneChatId
+                    ? { ...s, messages: [...s.messages, action.message], updatedAt: Date.now() }
+                    : s
+            )
+            return { ...state, standaloneChatSessions: sessions }
+        }
+
+        case 'UPDATE_LAST_STANDALONE_ASSISTANT_MESSAGE': {
+            if (!state.activeStandaloneChatId) return state
+            const sessions = [...state.standaloneChatSessions]
+            const activeSessionIndex = sessions.findIndex(s => s.id === state.activeStandaloneChatId)
+
+            if (activeSessionIndex >= 0) {
+                const session = { ...sessions[activeSessionIndex] }
+                const messages = [...session.messages]
+
+                let lastAssistant = -1
+                for (let i = messages.length - 1; i >= 0; i--) {
+                    if (messages[i].role === 'assistant') {
+                        lastAssistant = i
+                        break
+                    }
+                }
+
+                if (lastAssistant >= 0) {
+                    messages[lastAssistant] = { ...messages[lastAssistant], content: action.content }
+                    session.messages = messages
+                    session.updatedAt = Date.now()
+                    sessions[activeSessionIndex] = session
+                }
+            }
+            return { ...state, standaloneChatSessions: sessions }
+        }
+
+        case 'CLEAR_STANDALONE_CHAT': {
+            if (!state.activeStandaloneChatId) return state
+            const sessions = state.standaloneChatSessions.map(s =>
+                s.id === state.activeStandaloneChatId
+                    ? { ...s, messages: [], updatedAt: Date.now() }
+                    : s
+            )
+            return { ...state, standaloneChatSessions: sessions }
         }
 
         case 'SET_STREAMING':
@@ -340,23 +455,23 @@ function reducer(state: AppState, action: Action): AppState {
             return { ...state, showQuickOpen: !state.showQuickOpen }
 
         case 'TOGGLE_SPLIT_EDITOR':
-            return { 
-                ...state, 
-                splitEditor: { 
-                    ...state.splitEditor, 
+            return {
+                ...state,
+                splitEditor: {
+                    ...state.splitEditor,
                     enabled: !state.splitEditor.enabled,
                     secondaryFilePath: state.splitEditor.enabled ? null : state.splitEditor.secondaryFilePath
-                } 
+                }
             }
 
         case 'SET_SECONDARY_FILE':
-            return { 
-                ...state, 
-                splitEditor: { 
-                    ...state.splitEditor, 
+            return {
+                ...state,
+                splitEditor: {
+                    ...state.splitEditor,
                     secondaryFilePath: action.path,
                     enabled: action.path !== null ? true : state.splitEditor.enabled
-                } 
+                }
             }
 
         default:

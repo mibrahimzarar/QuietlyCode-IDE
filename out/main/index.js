@@ -32,6 +32,7 @@ const axios = require("axios");
 const AdmZip = require("adm-zip");
 const os = require("os");
 const pty = require("node-pty");
+const promises = require("fs/promises");
 const crypto = require("crypto");
 const node = require("vscode-jsonrpc/node");
 const events = require("events");
@@ -839,16 +840,30 @@ class ModelDownloader {
           reject(new Error("Too many redirects"));
           return;
         }
+        let parsedUrl;
+        try {
+          parsedUrl = new URL(requestUrl);
+        } catch {
+          reject(new Error(`Invalid URL: ${requestUrl}`));
+          return;
+        }
         const options = {
           headers: {}
         };
         if (resumeBytes > 0) {
           options.headers["Range"] = `bytes=${resumeBytes}-`;
         }
-        const protocol = requestUrl.startsWith("https") ? https : http;
+        const protocol = parsedUrl.protocol === "https:" ? https : http;
         const req = protocol.get(requestUrl, options, (res) => {
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            makeRequest(res.headers.location, redirectCount + 1);
+            let redirectUrl;
+            try {
+              redirectUrl = new URL(res.headers.location, requestUrl).href;
+            } catch {
+              reject(new Error(`Invalid redirect URL: ${res.headers.location}`));
+              return;
+            }
+            makeRequest(redirectUrl, redirectCount + 1);
             return;
           }
           if (res.statusCode !== 200 && res.statusCode !== 206) {
@@ -1202,30 +1217,33 @@ class VectorStore {
     this.documents = [];
     const userDataPath = electron.app.getPath("userData");
     this.storagePath = path.join(userDataPath, "rag-store.json");
-    this.load();
+    this.initPromise = this.load();
   }
-  add(doc) {
+  async add(doc) {
+    await this.initPromise;
     this.documents = this.documents.filter((d) => d.id !== doc.id);
     this.documents.push(doc);
   }
   async search(queryEmbedding, limit = 5) {
+    await this.initPromise;
     const results = this.documents.map((doc) => ({
       ...doc,
       score: this.cosineSimilarity(queryEmbedding, doc.embedding)
     }));
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }
-  save() {
+  async save() {
+    await this.initPromise;
     try {
-      fs.writeFileSync(this.storagePath, JSON.stringify(this.documents), "utf-8");
+      await promises.writeFile(this.storagePath, JSON.stringify(this.documents), "utf-8");
     } catch (err) {
       console.error("Failed to save Vector Store:", err);
     }
   }
-  load() {
+  async load() {
     if (fs.existsSync(this.storagePath)) {
       try {
-        const data = fs.readFileSync(this.storagePath, "utf-8");
+        const data = await promises.readFile(this.storagePath, "utf-8");
         this.documents = JSON.parse(data);
       } catch (err) {
         console.error("Failed to load Vector Store:", err);
@@ -1233,11 +1251,13 @@ class VectorStore {
       }
     }
   }
-  clear() {
+  async clear() {
+    await this.initPromise;
     this.documents = [];
-    this.save();
+    await this.save();
   }
-  getStats() {
+  async getStats() {
+    await this.initPromise;
     return {
       count: this.documents.length,
       path: this.storagePath
@@ -1282,7 +1302,7 @@ class CodebaseIndexer {
             const chunkId = `${relativePath}#chunk-${i}`;
             const embedding = await this.aiService.getEmbedding(chunks[i]);
             if (embedding && embedding.length > 0) {
-              this.vectorStore.add({
+              await this.vectorStore.add({
                 id: chunkId,
                 content: chunks[i],
                 embedding,
@@ -1296,10 +1316,10 @@ class CodebaseIndexer {
         }
         processed++;
         if (processed % 10 === 0) {
-          this.vectorStore.save();
+          await this.vectorStore.save();
         }
       }
-      this.vectorStore.save();
+      await this.vectorStore.save();
       if (onProgress) onProgress(processed, files.length, "Done");
     } finally {
       this.isIndexing = false;
@@ -2231,7 +2251,9 @@ function getDefaultSettings() {
     setupComplete: false,
     lastProjectPath: null,
     lastOpenFiles: [],
-    lastActiveFile: null
+    lastActiveFile: null,
+    chatMessages: [],
+    standaloneChatMessages: []
   };
 }
 function loadSettings() {

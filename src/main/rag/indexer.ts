@@ -44,7 +44,7 @@ export class CodebaseIndexer {
                         const embedding = await this.aiService.getEmbedding(chunks[i])
 
                         if (embedding && embedding.length > 0) {
-                            this.vectorStore.add({
+                            await this.vectorStore.add({
                                 id: chunkId,
                                 content: chunks[i],
                                 embedding,
@@ -61,11 +61,11 @@ export class CodebaseIndexer {
 
                 // Save periodically to avoid losing progress
                 if (processed % 10 === 0) {
-                    this.vectorStore.save()
+                    await this.vectorStore.save()
                 }
             }
 
-            this.vectorStore.save()
+            await this.vectorStore.save()
             if (onProgress) onProgress(processed, files.length, "Done")
         } finally {
             this.isIndexing = false

@@ -40,6 +40,8 @@ interface AppSettings {
     lastProjectPath: string | null
     lastOpenFiles: string[]
     lastActiveFile: string | null
+    chatMessages: any[]
+    standaloneChatMessages: any[]
 }
 
 function getDefaultSettings(): AppSettings {
@@ -55,7 +57,9 @@ function getDefaultSettings(): AppSettings {
         setupComplete: false,
         lastProjectPath: null,
         lastOpenFiles: [],
-        lastActiveFile: null
+        lastActiveFile: null,
+        chatMessages: [],
+        standaloneChatMessages: []
     }
 }
 
