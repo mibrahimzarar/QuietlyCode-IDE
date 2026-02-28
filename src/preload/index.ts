@@ -57,6 +57,17 @@ const electronAPI = {
     cancelDownload: () => ipcRenderer.invoke('models:cancelDownload'),
     scanLocalModels: (directory: string) => ipcRenderer.invoke('models:scanLocal', directory),
     deleteModel: (path: string) => ipcRenderer.invoke('models:delete', path),
+
+    // AirLLM model downloader
+    getAirllmModels: () => ipcRenderer.invoke('airllm:getAvailableModels'),
+    downloadAirllmModel: (modelId: string, targetDir: string) => ipcRenderer.invoke('airllm:downloadModel', modelId, targetDir),
+    cancelAirllmDownload: () => ipcRenderer.invoke('airllm:cancelDownload'),
+    installAirllmDeps: () => ipcRenderer.invoke('airllm:installDeps'),
+    onAirllmDownloadProgress: (callback: (data: { progress: number; speed: string; downloaded: string; total: string }) => void) => {
+        const listener = (_event: any, data: any) => callback(data)
+        ipcRenderer.on('airllm:downloadProgress', listener)
+        return () => ipcRenderer.removeListener('airllm:downloadProgress', listener)
+    },
     onDownloadProgress: (callback: (data: { modelId: string; progress: number; speed: string }) => void) => {
         const listener = (_event: any, data: any) => callback(data)
         ipcRenderer.on('models:downloadProgress', listener)
@@ -114,11 +125,11 @@ const electronAPI = {
     },
 
     // LSP
-    getDefinition: (filePath: string, line: number, character: number) => 
+    getDefinition: (filePath: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:definition', filePath, line, character),
-    getHover: (filePath: string, line: number, character: number) => 
+    getHover: (filePath: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:hover', filePath, line, character),
-    getDocumentSymbols: (filePath: string) => 
+    getDocumentSymbols: (filePath: string) =>
         ipcRenderer.invoke('lsp:documentSymbols', filePath),
 
     // Git
@@ -132,7 +143,7 @@ const electronAPI = {
     unstageFile: (projectPath: string, filePath: string) => ipcRenderer.invoke('git:unstage', projectPath, filePath),
     discardChanges: (projectPath: string, filePath: string) => ipcRenderer.invoke('git:discard', projectPath, filePath),
     commitChanges: (projectPath: string, message: string) => ipcRenderer.invoke('git:commit', projectPath, message),
-    createBranch: (projectPath: string, branchName: string, checkout?: boolean) => 
+    createBranch: (projectPath: string, branchName: string, checkout?: boolean) =>
         ipcRenderer.invoke('git:createBranch', projectPath, branchName, checkout || false),
     checkoutBranch: (projectPath: string, branchName: string) => ipcRenderer.invoke('git:checkout', projectPath, branchName),
     pullChanges: (projectPath: string) => ipcRenderer.invoke('git:pull', projectPath),
@@ -152,9 +163,9 @@ const electronAPI = {
     stepOver: (sessionId: string) => ipcRenderer.invoke('debug:stepOver', sessionId),
     stepInto: (sessionId: string) => ipcRenderer.invoke('debug:stepInto', sessionId),
     stepOut: (sessionId: string) => ipcRenderer.invoke('debug:stepOut', sessionId),
-    setBreakpoint: (sessionId: string, file: string, line: number, condition?: string) => 
+    setBreakpoint: (sessionId: string, file: string, line: number, condition?: string) =>
         ipcRenderer.invoke('debug:setBreakpoint', sessionId, file, line, condition),
-    removeBreakpoint: (sessionId: string, file: string, line: number) => 
+    removeBreakpoint: (sessionId: string, file: string, line: number) =>
         ipcRenderer.invoke('debug:removeBreakpoint', sessionId, file, line),
     getBreakpoints: (sessionId: string, file?: string) => ipcRenderer.invoke('debug:getBreakpoints', sessionId, file),
     getActiveDebugSessions: () => ipcRenderer.invoke('debug:getActiveSessions'),

@@ -142,9 +142,17 @@ export default function StandaloneChat() {
         return () => document.removeEventListener('mousedown', handleClick)
     }, [])
 
-    const currentModelName = state.settings.modelPath
-        ? state.settings.modelPath.split(/[\\/]/).pop()?.replace('.gguf', '') || 'Model'
-        : 'No Model'
+    const isAirllm = state.settings.aiBackend === 'airllm'
+
+    // AirLLM config state
+    const [airllmModelId, setAirllmModelId] = useState(state.settings.airllmModelId || 'Qwen/Qwen2.5-7B-Instruct')
+    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit' | 'none'>(state.settings.airllmCompression || 'none')
+
+    const currentModelName = isAirllm
+        ? (state.settings.airllmModelId?.split('/').pop() || 'AirLLM')
+        : state.settings.modelPath
+            ? state.settings.modelPath.split(/[\\/]/).pop()?.replace('.gguf', '') || 'Model'
+            : 'No Model'
 
     async function handleModelSelect(modelPath: string) {
         if (modelPath === state.settings.modelPath) {
@@ -723,18 +731,111 @@ export default function StandaloneChat() {
                                         <ChevronDown size={14} />
                                     </button>
 
-                                    {showModelDropdown && models.length > 0 && (
+                                    {showModelDropdown && (
                                         <div className="model-dropdown">
-                                            {models.map((m) => (
-                                                <div
-                                                    key={m.path}
-                                                    className={`model-dropdown-item ${m.path === state.settings.modelPath ? 'active' : ''}`}
-                                                    onClick={() => handleModelSelect(m.path)}
+                                            {/* Backend toggle */}
+                                            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 4 }}>
+                                                <button
+                                                    className={`model-dropdown-item ${!isAirllm ? 'active' : ''}`}
+                                                    style={{ flex: 1, textAlign: 'center', padding: '6px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', color: !isAirllm ? 'var(--accent)' : 'var(--text-muted)', borderBottom: !isAirllm ? '2px solid var(--accent)' : '2px solid transparent' }}
+                                                    onClick={async () => {
+                                                        const newSettings = { ...state.settings, aiBackend: 'llama' as const }
+                                                        await window.electronAPI.saveSettings(newSettings)
+                                                        dispatch({ type: 'SET_SETTINGS', settings: newSettings })
+                                                    }}
                                                 >
-                                                    <span className="model-dropdown-name">{m.name.replace('.gguf', '')}</span>
-                                                    <span className="model-dropdown-size">{m.size}</span>
+                                                    llama.cpp
+                                                </button>
+                                                <button
+                                                    className={`model-dropdown-item ${isAirllm ? 'active' : ''}`}
+                                                    style={{ flex: 1, textAlign: 'center', padding: '6px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', color: isAirllm ? 'var(--accent)' : 'var(--text-muted)', borderBottom: isAirllm ? '2px solid var(--accent)' : '2px solid transparent' }}
+                                                    onClick={async () => {
+                                                        const newSettings = { ...state.settings, aiBackend: 'airllm' as const }
+                                                        await window.electronAPI.saveSettings(newSettings)
+                                                        dispatch({ type: 'SET_SETTINGS', settings: newSettings })
+                                                    }}
+                                                >
+                                                    AirLLM
+                                                </button>
+                                            </div>
+
+                                            {isAirllm ? (
+                                                <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                    <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>HuggingFace Model ID</label>
+                                                    <input
+                                                        type="text"
+                                                        value={airllmModelId}
+                                                        onChange={(e) => setAirllmModelId(e.target.value)}
+                                                        placeholder="Qwen/Qwen2.5-7B-Instruct"
+                                                        style={{ padding: '5px 8px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: 'var(--text)', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                    <label style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Compression</label>
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        {(['4bit', '8bit', 'none'] as const).map((opt) => (
+                                                            <button
+                                                                key={opt}
+                                                                onClick={(e) => { e.stopPropagation(); setAirllmCompression(opt) }}
+                                                                style={{
+                                                                    flex: 1, padding: '4px 0', borderRadius: 4, fontSize: 11, cursor: 'pointer',
+                                                                    border: airllmCompression === opt ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.12)',
+                                                                    background: airllmCompression === opt ? 'rgba(var(--accent-rgb, 99,102,241), 0.15)' : 'rgba(255,255,255,0.04)',
+                                                                    color: airllmCompression === opt ? 'var(--accent)' : 'var(--text-muted)',
+                                                                    fontWeight: airllmCompression === opt ? 600 : 400
+                                                                }}
+                                                            >
+                                                                {opt === 'none' ? 'None' : opt}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <button
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation()
+                                                            setShowModelDropdown(false)
+                                                            setSwitchingModel(true)
+                                                            const newSettings = {
+                                                                ...state.settings,
+                                                                aiBackend: 'airllm' as const,
+                                                                airllmModelId,
+                                                                airllmCompression
+                                                            }
+                                                            await window.electronAPI.saveSettings(newSettings)
+                                                            dispatch({ type: 'SET_SETTINGS', settings: newSettings })
+                                                            try {
+                                                                await window.electronAPI.stopAIServer()
+                                                                const result = await window.electronAPI.startAIServer()
+                                                                setSwitchingModel(false)
+                                                                dispatch({ type: 'SET_AI_STATUS', status: result.success ? 'connected' : 'disconnected' })
+                                                            } catch {
+                                                                setSwitchingModel(false)
+                                                                dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            marginTop: 4, padding: '6px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+                                                            background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 12
+                                                        }}
+                                                    >
+                                                        Load Model
+                                                    </button>
                                                 </div>
-                                            ))}
+                                            ) : (
+                                                <>
+                                                    {models.map((m) => (
+                                                        <div
+                                                            key={m.path}
+                                                            className={`model-dropdown-item ${m.path === state.settings.modelPath ? 'active' : ''}`}
+                                                            onClick={() => handleModelSelect(m.path)}
+                                                        >
+                                                            <span className="model-dropdown-name">{m.name.replace('.gguf', '')}</span>
+                                                            <span className="model-dropdown-size">{m.size}</span>
+                                                        </div>
+                                                    ))}
+                                                    {models.length === 0 && (
+                                                        <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-muted)' }}>No models found</div>
+                                                    )}
+                                                </>
+                                            )}
                                         </div>
                                     )}
                                 </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useApp } from '../store/appStore'
-import { Cpu, Download, FolderOpen, ChevronRight, Zap, HardDrive, Check, AlertCircle, ArrowLeft } from 'lucide-react'
+import { Cpu, Download, FolderOpen, ChevronRight, Zap, HardDrive, Check, AlertCircle, ArrowLeft, Brain } from 'lucide-react'
 
 interface ModelInfo {
     id: string
@@ -16,6 +16,9 @@ export default function SetupScreen() {
     const [selectedModel, setSelectedModel] = useState<string | null>(null)
 
     const [step, setStep] = useState<'intro' | 'paths' | 'models' | 'download'>('intro')
+
+    // Backend choice
+    const [backend, setBackend] = useState<'llama' | 'airllm'>('llama')
 
     // Path state
     const [setupDownloadDir, setSetupDownloadDir] = useState<string>('')
@@ -33,8 +36,20 @@ export default function SetupScreen() {
     const [binaryStatus, setBinaryStatus] = useState('')
     const [downloadingBinary, setDownloadingBinary] = useState(false)
 
+    // AirLLM state
+    const [airllmModelId, setAirllmModelId] = useState('Qwen/Qwen2.5-7B-Instruct')
+    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit' | 'none'>('4bit')
+    const [airllmModels, setAirllmModels] = useState<Array<{ id: string; name: string; size: string; params?: string; description: string; category: string }>>([])
+    const [selectedAirllmModel, setSelectedAirllmModel] = useState<string | null>(null)
+    const [airllmDownloading, setAirllmDownloading] = useState(false)
+    const [airllmProgress, setAirllmProgress] = useState(0)
+    const [airllmSpeed, setAirllmSpeed] = useState('')
+    const [airllmDownloaded, setAirllmDownloaded] = useState('')
+    const [airllmTotal, setAirllmTotal] = useState('')
+
     useEffect(() => {
         loadModels()
+        loadAirllmModels()
     }, [])
 
     useEffect(() => {
@@ -46,9 +61,16 @@ export default function SetupScreen() {
             setBinaryProgress(data.progress)
             setBinaryStatus(data.status)
         })
+        const unsubscribeAirllm = window.electronAPI.onAirllmDownloadProgress?.((data) => {
+            setAirllmProgress(data.progress)
+            setAirllmSpeed(data.speed)
+            setAirllmDownloaded(data.downloaded)
+            setAirllmTotal(data.total)
+        })
         return () => {
             unsubscribe()
             unsubscribeBinary?.()
+            unsubscribeAirllm?.()
         }
     }, [])
 
@@ -58,6 +80,15 @@ export default function SetupScreen() {
             setModels(available)
         } catch {
             setModels([])
+        }
+    }
+
+    async function loadAirllmModels() {
+        try {
+            const available = await window.electronAPI.getAirllmModels()
+            setAirllmModels(available)
+        } catch {
+            setAirllmModels([])
         }
     }
 
@@ -119,15 +150,29 @@ export default function SetupScreen() {
         finishSetup(modelPath)
     }
 
-    async function finishSetup(modelPath: string) {
-        const settings = {
-            modelPath,
-            serverBinaryPath,
-            modelsDirectory: setupDownloadDir,
-            setupComplete: true,
+    async function finishSetup(modelPath?: string) {
+        if (backend === 'airllm') {
+            const settings = {
+                aiBackend: 'airllm' as const,
+                airllmModelId,
+                airllmCompression,
+                airllmMaxLength: 128,
+                modelsDirectory: setupDownloadDir || '',
+                setupComplete: true,
+            }
+            await window.electronAPI.saveSettings(settings)
+            dispatch({ type: 'SET_SETTINGS', settings })
+        } else {
+            const settings = {
+                aiBackend: 'llama' as const,
+                modelPath: modelPath || '',
+                serverBinaryPath,
+                modelsDirectory: setupDownloadDir,
+                setupComplete: true,
+            }
+            await window.electronAPI.saveSettings(settings)
+            dispatch({ type: 'SET_SETTINGS', settings })
         }
-        await window.electronAPI.saveSettings(settings)
-        dispatch({ type: 'SET_SETTINGS', settings })
         dispatch({ type: 'SET_SCREEN', screen: 'ide' })
     }
 
@@ -146,9 +191,12 @@ export default function SetupScreen() {
         </div>
     )
 
+    const canProceedFromPaths = backend === 'airllm'
+        ? true
+        : (setupDownloadDir && serverBinaryPath && !downloadingBinary)
+
     return (
         <div className="ws-root">
-            {/* Decorative background */}
             <div className="ws-bg-glow" />
 
             <div className="ws-card">
@@ -164,6 +212,30 @@ export default function SetupScreen() {
                             A calm, AI‑powered pair programmer running entirely on your machine.
                             No API keys. No data leaks. Just code.
                         </p>
+
+                        {/* Backend choice */}
+                        <div style={{ display: 'flex', gap: 10, margin: '20px 0 16px', width: '100%', maxWidth: 360 }}>
+                            <button
+                                className={`ws-btn ${backend === 'llama' ? 'ws-btn-primary' : 'ws-btn-ghost'}`}
+                                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                                onClick={() => setBackend('llama')}
+                            >
+                                <Cpu size={16} /> llama.cpp
+                            </button>
+                            <button
+                                className={`ws-btn ${backend === 'airllm' ? 'ws-btn-primary' : 'ws-btn-ghost'}`}
+                                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                                onClick={() => setBackend('airllm')}
+                            >
+                                <Brain size={16} /> AirLLM
+                            </button>
+                        </div>
+                        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, textAlign: 'center' }}>
+                            {backend === 'llama'
+                                ? 'CPU-friendly inference via llama.cpp (.gguf models)'
+                                : 'GPU layer-wise inference via AirLLM (HuggingFace models, < 4GB VRAM)'}
+                        </p>
+
                         <button className="ws-btn ws-btn-primary ws-btn-lg" onClick={() => setStep('paths')}>
                             Get Started <ChevronRight size={18} />
                         </button>
@@ -175,9 +247,12 @@ export default function SetupScreen() {
                     <div className="ws-body">
                         <StepDots active={1} />
                         <h2>Environment Setup</h2>
-                        <p className="ws-subtitle">Configure where QuietlyCode stores models and binaries.</p>
+                        <p className="ws-subtitle">
+                            {backend === 'airllm'
+                                ? 'AirLLM downloads models from HuggingFace automatically. Optionally set a storage directory.'
+                                : 'Configure where QuietlyCode stores models and binaries.'}
+                        </p>
 
-                        {/* Models dir */}
                         <div className="ws-field">
                             <label><FolderOpen size={14} /> Models Directory</label>
                             <div className="ws-input-row">
@@ -185,7 +260,7 @@ export default function SetupScreen() {
                                     type="text"
                                     readOnly
                                     value={setupDownloadDir}
-                                    placeholder="Select a folder to store AI models…"
+                                    placeholder={backend === 'airllm' ? 'Optional — HuggingFace cache used by default' : 'Select a folder to store AI models…'}
                                 />
                                 <button className="ws-btn ws-btn-secondary" onClick={handleSelectModelsDir}>
                                     Browse
@@ -193,42 +268,43 @@ export default function SetupScreen() {
                             </div>
                         </div>
 
-                        {/* Server binary */}
-                        <div className="ws-field">
-                            <label><Cpu size={14} /> Server Binary</label>
-                            <p className="ws-help">The engine that runs the models on your hardware.</p>
+                        {backend === 'llama' && (
+                            <div className="ws-field">
+                                <label><Cpu size={14} /> Server Binary</label>
+                                <p className="ws-help">The engine that runs the models on your hardware.</p>
 
-                            <div className="ws-binary-row">
-                                <button
-                                    className={`ws-btn ws-binary-btn ${serverBinaryPath ? 'success' : ''}`}
-                                    onClick={serverBinaryPath ? undefined : handleDownloadBinary}
-                                    disabled={downloadingBinary || !!serverBinaryPath}
-                                >
-                                    {downloadingBinary ? (
-                                        <>
-                                            <span className="ws-spinner" />
-                                            {binaryStatus || 'Downloading…'} {Math.round(binaryProgress)}%
-                                        </>
-                                    ) : serverBinaryPath ? (
-                                        <><Check size={16} /> Binary Ready</>
-                                    ) : (
-                                        <><Download size={16} /> Auto‑Download (Recommended)</>
-                                    )}
-                                </button>
-
-                                {!serverBinaryPath && !downloadingBinary && (
-                                    <button className="ws-btn ws-btn-ghost" onClick={handleSelectServerBinary}>
-                                        Browse Local
+                                <div className="ws-binary-row">
+                                    <button
+                                        className={`ws-btn ws-binary-btn ${serverBinaryPath ? 'success' : ''}`}
+                                        onClick={serverBinaryPath ? undefined : handleDownloadBinary}
+                                        disabled={downloadingBinary || !!serverBinaryPath}
+                                    >
+                                        {downloadingBinary ? (
+                                            <>
+                                                <span className="ws-spinner" />
+                                                {binaryStatus || 'Downloading…'} {Math.round(binaryProgress)}%
+                                            </>
+                                        ) : serverBinaryPath ? (
+                                            <><Check size={16} /> Binary Ready</>
+                                        ) : (
+                                            <><Download size={16} /> Auto‑Download (Recommended)</>
+                                        )}
                                     </button>
+
+                                    {!serverBinaryPath && !downloadingBinary && (
+                                        <button className="ws-btn ws-btn-ghost" onClick={handleSelectServerBinary}>
+                                            Browse Local
+                                        </button>
+                                    )}
+                                </div>
+
+                                {serverBinaryPath && (
+                                    <div className="ws-path-chip">
+                                        <Check size={12} /> {serverBinaryPath}
+                                    </div>
                                 )}
                             </div>
-
-                            {serverBinaryPath && (
-                                <div className="ws-path-chip">
-                                    <Check size={12} /> {serverBinaryPath}
-                                </div>
-                            )}
-                        </div>
+                        )}
 
                         {error && (
                             <div className="ws-error"><AlertCircle size={14} /> {error}</div>
@@ -240,7 +316,7 @@ export default function SetupScreen() {
                             </button>
                             <button
                                 className="ws-btn ws-btn-primary"
-                                disabled={!setupDownloadDir || !serverBinaryPath || downloadingBinary}
+                                disabled={!canProceedFromPaths}
                                 onClick={() => setStep('models')}
                             >
                                 Continue <ChevronRight size={16} />
@@ -253,71 +329,188 @@ export default function SetupScreen() {
                 {step === 'models' && (
                     <div className="ws-body">
                         <StepDots active={2} />
-                        <h2>Choose a Model</h2>
-                        <p className="ws-subtitle">Pick an AI model to power your coding assistant.</p>
 
-                        <div className="ws-models-scroll">
-                            {/* Installed */}
-                            {localModels.length > 0 && (
-                                <>
-                                    <h3 className="ws-group-label">Installed</h3>
+                        {backend === 'airllm' ? (
+                            <>
+                                <h2>Download AirLLM Model</h2>
+                                <p className="ws-subtitle">Select a HuggingFace model to download. AirLLM runs them with &lt; 4GB VRAM.</p>
+
+                                {/* Download progress */}
+                                {airllmDownloading && (
+                                    <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
+                                            <span>{airllmDownloaded} / {airllmTotal}</span>
+                                            <span>{airllmSpeed}</span>
+                                        </div>
+                                        <div className="ws-progress-bar" style={{ height: 6, borderRadius: 3 }}>
+                                            <div className="ws-progress-fill" style={{ width: `${airllmProgress}%` }} />
+                                        </div>
+                                        <button
+                                            className="ws-btn ws-btn-ghost"
+                                            style={{ marginTop: 8, width: '100%', fontSize: 12 }}
+                                            onClick={() => {
+                                                window.electronAPI.cancelAirllmDownload()
+                                                setAirllmDownloading(false)
+                                            }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Model catalog */}
+                                <div className="ws-models-scroll">
+                                    <h3 className="ws-group-label">Available Models</h3>
                                     <div className="ws-model-list">
-                                        {localModels.map((m, i) => (
+                                        {airllmModels.map((model) => (
                                             <button
-                                                key={i}
-                                                className="ws-model-card"
-                                                onClick={() => handleUseExistingModel(m.path)}
+                                                key={model.id}
+                                                className={`ws-model-card ${selectedAirllmModel === model.id ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    setSelectedAirllmModel(model.id)
+                                                    setAirllmModelId(model.id)
+                                                }}
                                             >
-                                                <HardDrive size={22} className="ws-model-icon installed" />
+                                                <Zap size={22} className="ws-model-icon" />
                                                 <div className="ws-model-info">
-                                                    <strong>{m.name}</strong>
-                                                    <span>Ready to use</span>
+                                                    <strong>{model.name}</strong>
+                                                    <span>{model.description}</span>
                                                 </div>
-                                                <span className="ws-model-size">{m.size}</span>
+                                                <span className="ws-model-size">{model.size}</span>
                                             </button>
                                         ))}
                                     </div>
-                                </>
-                            )}
+                                </div>
 
-                            {/* Available */}
-                            <h3 className="ws-group-label">Available for Download</h3>
-                            <div className="ws-model-list">
-                                {models
-                                    .filter((m) => !localModels.some((l) => l.name === m.filename))
-                                    .map((model) => (
-                                        <button
-                                            key={model.id}
-                                            className={`ws-model-card ${selectedModel === model.id ? 'active' : ''}`}
-                                            onClick={() => setSelectedModel(model.id)}
-                                        >
-                                            <Zap size={22} className="ws-model-icon" />
-                                            <div className="ws-model-info">
-                                                <strong>{model.name}</strong>
-                                                <span>{model.description}</span>
+                                {/* Custom model ID */}
+                                <div className="ws-field" style={{ marginTop: 12 }}>
+                                    <label><Brain size={14} /> Or enter a custom Model ID</label>
+                                    <input
+                                        type="text"
+                                        value={airllmModelId}
+                                        onChange={(e) => { setAirllmModelId(e.target.value); setSelectedAirllmModel(null) }}
+                                        placeholder="org/model-name"
+                                        style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: 'var(--text)', fontSize: 14 }}
+                                    />
+                                </div>
+
+                                {/* Compression */}
+                                <div className="ws-field" style={{ marginTop: 8 }}>
+                                    <label>Compression</label>
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                                        {(['4bit', '8bit', 'none'] as const).map((opt) => (
+                                            <button
+                                                key={opt}
+                                                className={`ws-btn ${airllmCompression === opt ? 'ws-btn-primary' : 'ws-btn-ghost'}`}
+                                                style={{ flex: 1 }}
+                                                onClick={() => setAirllmCompression(opt)}
+                                            >
+                                                {opt === 'none' ? 'None (FP16)' : opt}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {error && (
+                                    <div className="ws-error"><AlertCircle size={14} /> {error}</div>
+                                )}
+
+                                <div className="ws-actions">
+                                    <button className="ws-btn ws-btn-ghost" onClick={() => setStep('paths')}>
+                                        <ArrowLeft size={14} /> Back
+                                    </button>
+                                    <button
+                                        className="ws-btn ws-btn-primary"
+                                        disabled={!airllmModelId.trim() || airllmDownloading}
+                                        onClick={async () => {
+                                            if (!setupDownloadDir) {
+                                                // No target dir — just save the model ID and let AirLLM auto-download
+                                                finishSetup()
+                                                return
+                                            }
+                                            setAirllmDownloading(true)
+                                            setError('')
+                                            setAirllmProgress(0)
+                                            const result = await window.electronAPI.downloadAirllmModel(airllmModelId, setupDownloadDir)
+                                            setAirllmDownloading(false)
+                                            if (result.success) {
+                                                finishSetup(result.path)
+                                            } else {
+                                                setError(result.error || 'Download failed')
+                                            }
+                                        }}
+                                    >
+                                        <Download size={16} /> {setupDownloadDir ? 'Download & Launch' : 'Launch with AirLLM'}
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <h2>Choose a Model</h2>
+                                <p className="ws-subtitle">Pick an AI model to power your coding assistant.</p>
+
+                                <div className="ws-models-scroll">
+                                    {localModels.length > 0 && (
+                                        <>
+                                            <h3 className="ws-group-label">Installed</h3>
+                                            <div className="ws-model-list">
+                                                {localModels.map((m, i) => (
+                                                    <button
+                                                        key={i}
+                                                        className="ws-model-card"
+                                                        onClick={() => handleUseExistingModel(m.path)}
+                                                    >
+                                                        <HardDrive size={22} className="ws-model-icon installed" />
+                                                        <div className="ws-model-info">
+                                                            <strong>{m.name}</strong>
+                                                            <span>Ready to use</span>
+                                                        </div>
+                                                        <span className="ws-model-size">{m.size}</span>
+                                                    </button>
+                                                ))}
                                             </div>
-                                            <span className="ws-model-size">{model.size}</span>
-                                        </button>
-                                    ))}
-                            </div>
-                        </div>
+                                        </>
+                                    )}
 
-                        {error && (
-                            <div className="ws-error"><AlertCircle size={14} /> {error}</div>
+                                    <h3 className="ws-group-label">Available for Download</h3>
+                                    <div className="ws-model-list">
+                                        {models
+                                            .filter((m) => !localModels.some((l) => l.name === m.filename))
+                                            .map((model) => (
+                                                <button
+                                                    key={model.id}
+                                                    className={`ws-model-card ${selectedModel === model.id ? 'active' : ''}`}
+                                                    onClick={() => setSelectedModel(model.id)}
+                                                >
+                                                    <Zap size={22} className="ws-model-icon" />
+                                                    <div className="ws-model-info">
+                                                        <strong>{model.name}</strong>
+                                                        <span>{model.description}</span>
+                                                    </div>
+                                                    <span className="ws-model-size">{model.size}</span>
+                                                </button>
+                                            ))}
+                                    </div>
+                                </div>
+
+                                {error && (
+                                    <div className="ws-error"><AlertCircle size={14} /> {error}</div>
+                                )}
+
+                                <div className="ws-actions">
+                                    <button className="ws-btn ws-btn-ghost" onClick={() => setStep('paths')}>
+                                        <ArrowLeft size={14} /> Back
+                                    </button>
+                                    <button
+                                        className="ws-btn ws-btn-primary"
+                                        disabled={!selectedModel}
+                                        onClick={handleDownloadModel}
+                                    >
+                                        <Download size={16} /> Download & Launch
+                                    </button>
+                                </div>
+                            </>
                         )}
-
-                        <div className="ws-actions">
-                            <button className="ws-btn ws-btn-ghost" onClick={() => setStep('paths')}>
-                                <ArrowLeft size={14} /> Back
-                            </button>
-                            <button
-                                className="ws-btn ws-btn-primary"
-                                disabled={!selectedModel}
-                                onClick={handleDownloadModel}
-                            >
-                                <Download size={16} /> Download & Launch
-                            </button>
-                        </div>
                     </div>
                 )}
 

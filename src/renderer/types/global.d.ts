@@ -51,6 +51,13 @@ declare global {
             onDownloadComplete: (callback: (data: { modelId: string; path: string }) => void) => () => void
             onDownloadError: (callback: (data: { modelId: string; error: string }) => void) => () => void
 
+            // AirLLM model downloader
+            getAirllmModels: () => Promise<any[]>
+            downloadAirllmModel: (modelId: string, targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>
+            cancelAirllmDownload: () => Promise<void>
+            installAirllmDeps: () => Promise<{ success: boolean; output: string }>
+            onAirllmDownloadProgress: (callback: (data: { progress: number; speed: string; downloaded: string; total: string }) => void) => () => void
+
             // Binary downloader
             downloadBinary: (targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>
             cancelBinaryDownload: () => Promise<void>

@@ -1,9 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron'
 import { join, dirname, basename, extname } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, renameSync, readdirSync, statSync, rmSync } from 'fs'
-import { exec } from 'child_process'
+import { exec, spawn, ChildProcess } from 'child_process'
 import { FileService } from './file-service'
 import { AIService } from './ai-service'
+import { AirLLMService } from './airllm-service'
 import { ModelDownloader } from './model-downloader'
 import { BinaryDownloader } from './binary-downloader'
 import { TerminalManager } from './terminal-manager'
@@ -18,6 +19,7 @@ import { DebugService } from './debug-service'
 let mainWindow: BrowserWindow | null = null
 let fileService: FileService
 let aiService: AIService
+let airllmService: AirLLMService
 let modelDownloader: ModelDownloader
 let diagnosticService: DiagnosticService
 let lspService: LSPService
@@ -42,6 +44,10 @@ interface AppSettings {
     lastActiveFile: string | null
     chatMessages: any[]
     standaloneChatMessages: any[]
+    aiBackend: 'llama' | 'airllm'
+    airllmModelId: string
+    airllmCompression: '4bit' | '8bit' | 'none'
+    airllmMaxLength: number
 }
 
 function getDefaultSettings(): AppSettings {
@@ -59,7 +65,11 @@ function getDefaultSettings(): AppSettings {
         lastOpenFiles: [],
         lastActiveFile: null,
         chatMessages: [],
-        standaloneChatMessages: []
+        standaloneChatMessages: [],
+        aiBackend: 'llama',
+        airllmModelId: 'Qwen/Qwen2.5-7B-Instruct',
+        airllmCompression: 'none',
+        airllmMaxLength: 128
     }
 }
 
@@ -126,6 +136,7 @@ function setupIPC(): void {
     const settings = loadSettings()
     fileService = new FileService()
     aiService = new AIService()
+    airllmService = new AirLLMService()
     modelDownloader = new ModelDownloader()
     diagnosticService = new DiagnosticService()
     lspService = new LSPService()
@@ -281,9 +292,19 @@ function setupIPC(): void {
         return results
     })
 
-    // --- AI Service ---
+    // --- AI Service (routes to llama or airllm based on settings) ---
     ipcMain.handle('ai:startServer', async (_event) => {
         const s = loadSettings()
+
+        if (s.aiBackend === 'airllm') {
+            return airllmService.start({
+                modelId: s.airllmModelId,
+                compression: s.airllmCompression,
+                maxLength: s.airllmMaxLength
+            })
+        }
+
+        // Default: llama.cpp
         if (!s.serverBinaryPath || !s.modelPath) {
             return { success: false, error: 'Server binary or model path not configured' }
         }
@@ -297,40 +318,58 @@ function setupIPC(): void {
     })
 
     ipcMain.handle('ai:stopServer', async () => {
+        const s = loadSettings()
+        if (s.aiBackend === 'airllm') {
+            return airllmService.stop()
+        }
         return aiService.stop()
     })
 
     ipcMain.handle('ai:getStatus', () => {
+        const s = loadSettings()
+        if (s.aiBackend === 'airllm') {
+            return airllmService.getStatus()
+        }
         return aiService.getStatus()
     })
 
     ipcMain.handle('ai:chat', async (_event, messages: Array<{ role: string, content: string }>, options?: { maxTokens?: number, temperature?: number }) => {
         const s = loadSettings()
-        return aiService.chat(messages, {
+        const opts = {
             maxTokens: options?.maxTokens || s.maxTokens,
             temperature: options?.temperature || s.temperature
-        })
+        }
+        if (s.aiBackend === 'airllm') {
+            return airllmService.chat(messages, opts)
+        }
+        return aiService.chat(messages, opts)
     })
 
     ipcMain.handle('ai:chatStream', async (event, messages: Array<{ role: string, content: string }>, options?: { maxTokens?: number, temperature?: number }) => {
         const s = loadSettings()
-        return aiService.chatStream(
-            messages,
-            {
-                maxTokens: options?.maxTokens || s.maxTokens,
-                temperature: options?.temperature || s.temperature
-            },
-            (chunk: string) => {
-                mainWindow?.webContents.send('ai:streamChunk', chunk)
-            },
-            () => {
-                mainWindow?.webContents.send('ai:streamEnd')
-            }
-        )
+        const opts = {
+            maxTokens: options?.maxTokens || s.maxTokens,
+            temperature: options?.temperature || s.temperature
+        }
+        const onChunk = (chunk: string) => {
+            mainWindow?.webContents.send('ai:streamChunk', chunk)
+        }
+        const onEnd = () => {
+            mainWindow?.webContents.send('ai:streamEnd')
+        }
+        if (s.aiBackend === 'airllm') {
+            return airllmService.chatStream(messages, opts, onChunk, onEnd)
+        }
+        return aiService.chatStream(messages, opts, onChunk, onEnd)
     })
 
     ipcMain.handle('ai:stopStream', () => {
-        aiService.abortStream()
+        const s = loadSettings()
+        if (s.aiBackend === 'airllm') {
+            airllmService.abortStream()
+        } else {
+            aiService.abortStream()
+        }
     })
 
     // --- AI Codebase Analysis ---
@@ -446,6 +485,110 @@ function setupIPC(): void {
             await aiService.stop()
         }
         return modelDownloader.deleteModel(filePath)
+    })
+
+    // --- AirLLM Model Downloader ---
+    let airllmDownloadProcess: ChildProcess | null = null
+
+    const AIRLLM_MODELS = [
+        { id: 'Qwen/Qwen2.5-72B-Instruct', name: 'Qwen 2.5 72B Instruct', size: '~145 GB', params: '72B', description: 'Alibaba\'s flagship 72B. State-of-the-art reasoning and multilingual.', category: 'general' },
+        { id: 'Qwen/Qwen2.5-32B-Instruct', name: 'Qwen 2.5 32B Instruct', size: '~65 GB', params: '32B', description: 'Alibaba\'s powerful 32B. Excellent quality-to-size ratio.', category: 'general' },
+        { id: 'Qwen/Qwen2.5-14B-Instruct', name: 'Qwen 2.5 14B Instruct', size: '~28 GB', params: '14B', description: 'Alibaba\'s mid-range model. Strong capabilities, moderate download.', category: 'general' },
+        { id: 'Qwen/Qwen2.5-7B-Instruct', name: 'Qwen 2.5 7B Instruct', size: '~15 GB', params: '7B', description: 'Alibaba\'s efficient 7B. Fast with excellent reasoning.', category: 'general' },
+        { id: 'mistralai/Mistral-7B-Instruct-v0.3', name: 'Mistral 7B Instruct v0.3', size: '~14 GB', params: '7B', description: 'Mistral AI\'s flagship 7B instruct model.', category: 'general' },
+        { id: 'mistralai/Mixtral-8x7B-v0.1', name: 'Mixtral 8x7B MoE', size: '~93 GB', params: '46.7B MoE', description: 'Mixture of Experts. Excellent quality via sparse activation.', category: 'general' },
+        { id: 'google/gemma-2-27b-it', name: 'Gemma 2 27B Instruct', size: '~54 GB', params: '27B', description: 'Google\'s 27B instruct model. Excellent instruction following.', category: 'general' },
+        { id: 'google/gemma-2-9b-it', name: 'Gemma 2 9B Instruct', size: '~18 GB', params: '9B', description: 'Google\'s efficient 9B model. Great balance of size and quality.', category: 'general' },
+        { id: 'Qwen/Qwen2.5-Coder-32B-Instruct', name: 'Qwen 2.5 Coder 32B', size: '~65 GB', params: '32B', description: 'Alibaba\'s best code model. Top-tier code generation.', category: 'code' },
+        { id: 'Qwen/Qwen2.5-Coder-14B-Instruct', name: 'Qwen 2.5 Coder 14B', size: '~28 GB', params: '14B', description: 'Alibaba\'s mid-sized code model. Strong coding capabilities.', category: 'code' },
+        { id: 'Qwen/Qwen2.5-Coder-7B-Instruct', name: 'Qwen 2.5 Coder 7B', size: '~15 GB', params: '7B', description: 'Alibaba\'s compact code model. Fast code completion.', category: 'code' },
+        { id: 'bigcode/starcoder2-15b', name: 'StarCoder2 15B', size: '~30 GB', params: '15B', description: 'BigCode\'s code generation model. Trained on The Stack v2.', category: 'code' },
+    ]
+
+    ipcMain.handle('airllm:getAvailableModels', async () => {
+        return AIRLLM_MODELS
+    })
+
+    ipcMain.handle('airllm:downloadModel', async (_event, modelId: string, targetDir: string) => {
+        return new Promise((resolve) => {
+            const scriptPath = join(__dirname, '..', '..', 'src', 'main', 'python', 'airllm_downloader.py')
+            const args = [scriptPath, modelId]
+            if (targetDir) args.push(targetDir)
+
+            airllmDownloadProcess = spawn('python', args, {
+                stdio: ['pipe', 'pipe', 'pipe']
+            })
+
+            let lastError = ''
+
+            airllmDownloadProcess.stdout?.on('data', (data: Buffer) => {
+                const lines = data.toString().split('\n').filter(Boolean)
+                for (const line of lines) {
+                    try {
+                        const msg = JSON.parse(line)
+                        if (msg.type === 'progress') {
+                            mainWindow?.webContents.send('airllm:downloadProgress', {
+                                progress: msg.progress,
+                                speed: msg.speed,
+                                downloaded: msg.downloaded,
+                                total: msg.total
+                            })
+                        } else if (msg.type === 'complete') {
+                            resolve({ success: true, path: msg.path })
+                        } else if (msg.type === 'error') {
+                            lastError = msg.message
+                        }
+                    } catch { /* skip non-JSON lines */ }
+                }
+            })
+
+            airllmDownloadProcess.stderr?.on('data', (data: Buffer) => {
+                lastError = data.toString().trim()
+            })
+
+            airllmDownloadProcess.on('close', (code) => {
+                airllmDownloadProcess = null
+                if (code !== 0) {
+                    resolve({ success: false, error: lastError || `Process exited with code ${code}` })
+                }
+            })
+
+            airllmDownloadProcess.on('error', (err) => {
+                airllmDownloadProcess = null
+                resolve({ success: false, error: err.message })
+            })
+        })
+    })
+
+    ipcMain.handle('airllm:cancelDownload', () => {
+        if (airllmDownloadProcess) {
+            airllmDownloadProcess.kill()
+            airllmDownloadProcess = null
+        }
+    })
+
+    ipcMain.handle('airllm:installDeps', async () => {
+        return new Promise((resolve) => {
+            const proc = spawn('python', ['-m', 'pip', 'install', 'huggingface_hub', 'airllm', 'torch'], {
+                stdio: ['pipe', 'pipe', 'pipe']
+            })
+
+            let outputText = ''
+            proc.stdout?.on('data', (data: Buffer) => {
+                outputText += data.toString()
+                mainWindow?.webContents.send('airllm:installProgress', { status: data.toString().trim() })
+            })
+            proc.stderr?.on('data', (data: Buffer) => {
+                outputText += data.toString()
+            })
+
+            proc.on('close', (code) => {
+                resolve({ success: code === 0, output: outputText })
+            })
+            proc.on('error', (err) => {
+                resolve({ success: false, output: err.message })
+            })
+        })
     })
 
     // --- Binary Downloader ---
@@ -706,6 +849,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
     aiService?.stop()
+    airllmService?.stop()
     if (process.platform !== 'darwin') {
         app.quit()
     }

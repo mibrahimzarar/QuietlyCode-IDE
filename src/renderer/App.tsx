@@ -52,15 +52,15 @@ export default function App() {
                 dispatch({ type: 'SET_SETTINGS', settings })
 
                 // Check if this is a returning user (setupComplete with valid paths)
-                const isReturningUser = settings.setupComplete &&
-                    settings.modelPath &&
-                    settings.serverBinaryPath
+                const isLlamaReady = settings.modelPath && settings.serverBinaryPath
+                const isAirllmReady = settings.aiBackend === 'airllm' && settings.airllmModelId
+                const isReturningUser = settings.setupComplete && (isLlamaReady || isAirllmReady)
 
                 if (isReturningUser) {
-                    // Returning user - go directly to IDE
+                    // Returning user — show IDE IMMEDIATELY, restore everything in background
                     dispatch({ type: 'SET_SCREEN', screen: 'ide' })
 
-                    // Restore chat history
+                    // Restore chat history (synchronous dispatches, instant)
                     if (settings.chatMessages && settings.chatMessages.length > 0) {
                         dispatch({ type: 'SET_CHAT_MESSAGES', messages: settings.chatMessages })
                     }
@@ -68,56 +68,65 @@ export default function App() {
                         dispatch({ type: 'SET_STANDALONE_CHAT_SESSIONS', sessions: settings.standaloneChatSessions })
                     }
 
-                    // Restore session
+                    // Hide loading screen NOW — everything below runs in background
+                    setIsInitializing(false)
+
+                    // ── Background: restore project files ──
                     if (settings.lastProjectPath) {
-                        const tree = await window.electronAPI.getFileTree(settings.lastProjectPath)
-                        dispatch({ type: 'SET_PROJECT', path: settings.lastProjectPath, tree })
+                        window.electronAPI.getFileTree(settings.lastProjectPath).then((tree) => {
+                            dispatch({ type: 'SET_PROJECT', path: settings.lastProjectPath!, tree })
 
-                        // Restore open files
-                        for (const filePath of settings.lastOpenFiles) {
-                            const result = await window.electronAPI.readFile(filePath)
-                            if (result.success && result.content !== undefined) {
-                                const name = filePath.split('\\').pop() || filePath
-                                const ext = name.split('.').pop()?.toLowerCase() || ''
-                                const langMap: Record<string, string> = {
-                                    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-                                    py: 'python', rs: 'rust', go: 'go', java: 'java', cpp: 'cpp', c: 'c',
-                                    h: 'c', hpp: 'cpp', css: 'css', html: 'html', json: 'json', md: 'markdown',
-                                    yaml: 'yaml', yml: 'yaml', xml: 'xml', sh: 'shell', sql: 'sql',
-                                    rb: 'ruby', php: 'php', swift: 'swift', kt: 'kotlin', toml: 'toml'
-                                }
-                                dispatch({
-                                    type: 'OPEN_FILE',
-                                    file: {
-                                        path: filePath,
-                                        name,
-                                        content: result.content,
-                                        language: langMap[ext] || 'plaintext',
-                                        isDirty: false
-                                    }
-                                })
+                            // Read open files in parallel
+                            const langMap: Record<string, string> = {
+                                ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+                                py: 'python', rs: 'rust', go: 'go', java: 'java', cpp: 'cpp', c: 'c',
+                                h: 'c', hpp: 'cpp', css: 'css', html: 'html', json: 'json', md: 'markdown',
+                                yaml: 'yaml', yml: 'yaml', xml: 'xml', sh: 'shell', sql: 'sql',
+                                rb: 'ruby', php: 'php', swift: 'swift', kt: 'kotlin', toml: 'toml'
                             }
-                        }
 
-                        // Restore active file
-                        if (settings.lastActiveFile) {
-                            dispatch({ type: 'SET_ACTIVE_FILE', path: settings.lastActiveFile })
-                        }
+                            Promise.all(
+                                (settings.lastOpenFiles || []).map(async (filePath: string) => {
+                                    try {
+                                        const result = await window.electronAPI.readFile(filePath)
+                                        if (result.success && result.content !== undefined) {
+                                            const name = filePath.split('\\').pop() || filePath
+                                            const ext = name.split('.').pop()?.toLowerCase() || ''
+                                            dispatch({
+                                                type: 'OPEN_FILE',
+                                                file: {
+                                                    path: filePath,
+                                                    name,
+                                                    content: result.content,
+                                                    language: langMap[ext] || 'plaintext',
+                                                    isDirty: false
+                                                }
+                                            })
+                                        }
+                                    } catch { /* skip unreadable files */ }
+                                })
+                            ).then(() => {
+                                if (settings.lastActiveFile) {
+                                    dispatch({ type: 'SET_ACTIVE_FILE', path: settings.lastActiveFile })
+                                }
+                            })
+                        }).catch(() => { /* skip if folder no longer exists */ })
                     }
 
-                    // Scan models at boot
+                    // ── Background: scan models ──
                     if (settings.modelsDirectory) {
                         window.electronAPI.scanLocalModels(settings.modelsDirectory).catch(() => { })
                     }
 
-                    // Start AI server immediately
+                    // ── Background: start AI server ──
                     dispatch({ type: 'SET_AI_STATUS', status: 'connecting' })
-                    try {
-                        const aiResult = await window.electronAPI.startAIServer()
+                    window.electronAPI.startAIServer().then((aiResult) => {
                         dispatch({ type: 'SET_AI_STATUS', status: aiResult.success ? 'connected' : 'disconnected' })
-                    } catch {
+                    }).catch(() => {
                         dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
-                    }
+                    })
+
+                    return // early return — setIsInitializing already called above
                 } else {
                     dispatch({ type: 'SET_SCREEN', screen: 'setup' })
                     dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
@@ -159,23 +168,22 @@ export default function App() {
         document.documentElement.setAttribute('data-theme', state.settings.theme)
     }, [state.settings.theme])
 
-    // Auto-start AI server when entering IDE
+    // Auto-start AI server when entering IDE (handles setup completion flow)
     useEffect(() => {
-        if (state.screen === 'ide' && state.settings.modelPath && state.settings.serverBinaryPath) {
-            dispatch({ type: 'SET_AI_STATUS', status: 'connecting' })
-            window.electronAPI.startAIServer().then((result) => {
-                if (result.success) {
-                    dispatch({ type: 'SET_AI_STATUS', status: 'connected' })
-                    console.log('[App] AI server started successfully')
-                } else {
-                    dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
-                    console.error('[App] AI server failed to start:', result.error)
-                }
-            }).catch((err) => {
-                dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
-                console.error('[App] AI server start error:', err)
-            })
-        }
+        if (state.screen !== 'ide') return
+        // Only auto-start if not already connecting/connected (avoids double-call from initApp)
+        if (state.aiStatus !== 'disconnected') return
+
+        const hasLlama = state.settings.modelPath && state.settings.serverBinaryPath
+        const hasAirllm = state.settings.aiBackend === 'airllm' && state.settings.airllmModelId
+        if (!hasLlama && !hasAirllm) return
+
+        dispatch({ type: 'SET_AI_STATUS', status: 'connecting' })
+        window.electronAPI.startAIServer().then((result) => {
+            dispatch({ type: 'SET_AI_STATUS', status: result.success ? 'connected' : 'disconnected' })
+        }).catch(() => {
+            dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
+        })
     }, [state.screen])
 
     // Download event listeners

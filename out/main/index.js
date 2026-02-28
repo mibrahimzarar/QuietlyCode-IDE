@@ -27,6 +27,7 @@ const fs = require("fs");
 const child_process = require("child_process");
 const util = require("util");
 const http = require("http");
+const readline = require("readline");
 const https = require("https");
 const axios = require("axios");
 const AdmZip = require("adm-zip");
@@ -502,6 +503,223 @@ class AIService {
       this.currentStreamRequest.destroy();
       this.currentStreamRequest = null;
     }
+  }
+}
+class AirLLMService {
+  constructor() {
+    this.process = null;
+    this.rl = null;
+    this.isRunning = false;
+    this.isModelReady = false;
+    this.currentStreamAborted = false;
+  }
+  /**
+   * Spawn the Python server and send the init command.
+   */
+  async start(config) {
+    if (this.isRunning) {
+      return { success: true };
+    }
+    try {
+      const scriptPath = path.join(__dirname, "..", "..", "src", "main", "python", "airllm_server.py");
+      this.process = child_process.spawn("python", [scriptPath], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, PYTHONUNBUFFERED: "1" }
+      });
+      let stderrOutput = "";
+      this.process.stderr?.on("data", (data) => {
+        stderrOutput = (stderrOutput + data.toString()).slice(-5e3);
+      });
+      this.process.on("error", () => {
+        this.isRunning = false;
+        this.isModelReady = false;
+      });
+      this.process.on("exit", () => {
+        this.isRunning = false;
+        this.isModelReady = false;
+        this.rl = null;
+      });
+      this.rl = readline.createInterface({ input: this.process.stdout });
+      this.isRunning = true;
+      this.send({
+        action: "init",
+        model_id: config.modelId,
+        compression: config.compression,
+        max_length: config.maxLength
+      });
+      const ready = await this.waitForReady(12e4);
+      if (ready) {
+        this.isModelReady = true;
+        return { success: true };
+      } else {
+        this.stop();
+        const lastLines = stderrOutput.trim().split("\n").slice(-5).join("\n");
+        return {
+          success: false,
+          error: `AirLLM model failed to load within timeout. ${lastLines || "No stderr output."}`
+        };
+      }
+    } catch (err) {
+      return { success: false, error: `Failed to spawn Python process: ${err.message}` };
+    }
+  }
+  /**
+   * Gracefully shut down the Python subprocess.
+   */
+  async stop() {
+    if (this.process) {
+      try {
+        this.send({ action: "stop" });
+      } catch {
+      }
+      const proc = this.process;
+      this.process = null;
+      this.isRunning = false;
+      this.isModelReady = false;
+      this.rl = null;
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          try {
+            proc.kill("SIGKILL");
+          } catch {
+          }
+          resolve();
+        }, 3e3);
+        proc.on("exit", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+    }
+  }
+  getStatus() {
+    return { running: this.isRunning && this.isModelReady, port: 0 };
+  }
+  /**
+   * Non-streaming chat (collects full response).
+   */
+  async chat(messages, options) {
+    if (!this.isRunning || !this.isModelReady) {
+      return { success: false, error: "AirLLM model not loaded" };
+    }
+    const prompt = this.messagesToPrompt(messages);
+    this.send({
+      action: "generate",
+      prompt,
+      max_new_tokens: options.maxTokens,
+      temperature: options.temperature
+    });
+    return new Promise((resolve) => {
+      let fullText = "";
+      const handler = (line) => {
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "chunk") {
+            fullText += msg.text;
+          } else if (msg.type === "done") {
+            this.rl?.removeListener("line", handler);
+            resolve({ success: true, content: msg.text || fullText });
+          } else if (msg.type === "error") {
+            this.rl?.removeListener("line", handler);
+            resolve({ success: false, error: msg.message });
+          }
+        } catch {
+        }
+      };
+      this.rl?.on("line", handler);
+    });
+  }
+  /**
+   * Streaming chat — emits chunks via callbacks.
+   */
+  async chatStream(messages, options, onChunk, onEnd) {
+    if (!this.isRunning || !this.isModelReady) {
+      onEnd();
+      return { success: false, error: "AirLLM model not loaded" };
+    }
+    this.currentStreamAborted = false;
+    const prompt = this.messagesToPrompt(messages);
+    this.send({
+      action: "generate",
+      prompt,
+      max_new_tokens: options.maxTokens,
+      temperature: options.temperature
+    });
+    return new Promise((resolve) => {
+      const handler = (line) => {
+        if (this.currentStreamAborted) {
+          this.rl?.removeListener("line", handler);
+          onEnd();
+          resolve({ success: true });
+          return;
+        }
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "chunk") {
+            onChunk(msg.text);
+          } else if (msg.type === "done") {
+            this.rl?.removeListener("line", handler);
+            onEnd();
+            resolve({ success: true });
+          } else if (msg.type === "error") {
+            this.rl?.removeListener("line", handler);
+            onEnd();
+            resolve({ success: false, error: msg.message });
+          }
+        } catch {
+        }
+      };
+      this.rl?.on("line", handler);
+    });
+  }
+  abortStream() {
+    this.currentStreamAborted = true;
+  }
+  // ─── Private helpers ──────────────────────────────────────────
+  send(obj) {
+    if (this.process?.stdin?.writable) {
+      this.process.stdin.write(JSON.stringify(obj) + "\n");
+    }
+  }
+  /**
+   * Convert chat messages array to a single prompt string.
+   */
+  messagesToPrompt(messages) {
+    return messages.map((m) => {
+      if (m.role === "system") return `[System]
+${m.content}`;
+      if (m.role === "user") return `[User]
+${m.content}`;
+      return `[Assistant]
+${m.content}`;
+    }).join("\n\n") + "\n\n[Assistant]\n";
+  }
+  /**
+   * Wait for the {"type":"ready"} message from the Python process.
+   */
+  waitForReady(timeoutMs) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.rl?.removeListener("line", handler);
+        resolve(false);
+      }, timeoutMs);
+      const handler = (line) => {
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "ready") {
+            clearTimeout(timer);
+            this.rl?.removeListener("line", handler);
+            resolve(true);
+          } else if (msg.type === "error") {
+            clearTimeout(timer);
+            this.rl?.removeListener("line", handler);
+            resolve(false);
+          }
+        } catch {
+        }
+      };
+      this.rl?.on("line", handler);
+    });
   }
 }
 const AVAILABLE_MODELS = [
@@ -2231,6 +2449,7 @@ class DebugService extends events.EventEmitter {
 let mainWindow = null;
 let fileService;
 let aiService;
+let airllmService;
 let modelDownloader;
 let diagnosticService;
 let lspService;
@@ -2253,7 +2472,11 @@ function getDefaultSettings() {
     lastOpenFiles: [],
     lastActiveFile: null,
     chatMessages: [],
-    standaloneChatMessages: []
+    standaloneChatMessages: [],
+    aiBackend: "llama",
+    airllmModelId: "Qwen/Qwen2.5-7B-Instruct",
+    airllmCompression: "none",
+    airllmMaxLength: 128
   };
 }
 function loadSettings() {
@@ -2311,6 +2534,7 @@ function setupIPC() {
   loadSettings();
   fileService = new FileService();
   aiService = new AIService();
+  airllmService = new AirLLMService();
   modelDownloader = new ModelDownloader();
   diagnosticService = new DiagnosticService();
   lspService = new LSPService();
@@ -2449,6 +2673,13 @@ function setupIPC() {
   });
   electron.ipcMain.handle("ai:startServer", async (_event) => {
     const s = loadSettings();
+    if (s.aiBackend === "airllm") {
+      return airllmService.start({
+        modelId: s.airllmModelId,
+        compression: s.airllmCompression,
+        maxLength: s.airllmMaxLength
+      });
+    }
     if (!s.serverBinaryPath || !s.modelPath) {
       return { success: false, error: "Server binary or model path not configured" };
     }
@@ -2461,36 +2692,54 @@ function setupIPC() {
     });
   });
   electron.ipcMain.handle("ai:stopServer", async () => {
+    const s = loadSettings();
+    if (s.aiBackend === "airllm") {
+      return airllmService.stop();
+    }
     return aiService.stop();
   });
   electron.ipcMain.handle("ai:getStatus", () => {
+    const s = loadSettings();
+    if (s.aiBackend === "airllm") {
+      return airllmService.getStatus();
+    }
     return aiService.getStatus();
   });
   electron.ipcMain.handle("ai:chat", async (_event, messages, options) => {
     const s = loadSettings();
-    return aiService.chat(messages, {
+    const opts = {
       maxTokens: options?.maxTokens || s.maxTokens,
       temperature: options?.temperature || s.temperature
-    });
+    };
+    if (s.aiBackend === "airllm") {
+      return airllmService.chat(messages, opts);
+    }
+    return aiService.chat(messages, opts);
   });
   electron.ipcMain.handle("ai:chatStream", async (event, messages, options) => {
     const s = loadSettings();
-    return aiService.chatStream(
-      messages,
-      {
-        maxTokens: options?.maxTokens || s.maxTokens,
-        temperature: options?.temperature || s.temperature
-      },
-      (chunk) => {
-        mainWindow?.webContents.send("ai:streamChunk", chunk);
-      },
-      () => {
-        mainWindow?.webContents.send("ai:streamEnd");
-      }
-    );
+    const opts = {
+      maxTokens: options?.maxTokens || s.maxTokens,
+      temperature: options?.temperature || s.temperature
+    };
+    const onChunk = (chunk) => {
+      mainWindow?.webContents.send("ai:streamChunk", chunk);
+    };
+    const onEnd = () => {
+      mainWindow?.webContents.send("ai:streamEnd");
+    };
+    if (s.aiBackend === "airllm") {
+      return airllmService.chatStream(messages, opts, onChunk, onEnd);
+    }
+    return aiService.chatStream(messages, opts, onChunk, onEnd);
   });
   electron.ipcMain.handle("ai:stopStream", () => {
-    aiService.abortStream();
+    const s = loadSettings();
+    if (s.aiBackend === "airllm") {
+      airllmService.abortStream();
+    } else {
+      aiService.abortStream();
+    }
   });
   electron.ipcMain.handle("ai:analyzeCodebase", async (_event, projectPath) => {
     try {
@@ -2594,6 +2843,96 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
       await aiService.stop();
     }
     return modelDownloader.deleteModel(filePath);
+  });
+  let airllmDownloadProcess = null;
+  const AIRLLM_MODELS = [
+    { id: "Qwen/Qwen2.5-72B-Instruct", name: "Qwen 2.5 72B Instruct", size: "~145 GB", params: "72B", description: "Alibaba's flagship 72B. State-of-the-art reasoning and multilingual.", category: "general" },
+    { id: "Qwen/Qwen2.5-32B-Instruct", name: "Qwen 2.5 32B Instruct", size: "~65 GB", params: "32B", description: "Alibaba's powerful 32B. Excellent quality-to-size ratio.", category: "general" },
+    { id: "Qwen/Qwen2.5-14B-Instruct", name: "Qwen 2.5 14B Instruct", size: "~28 GB", params: "14B", description: "Alibaba's mid-range model. Strong capabilities, moderate download.", category: "general" },
+    { id: "Qwen/Qwen2.5-7B-Instruct", name: "Qwen 2.5 7B Instruct", size: "~15 GB", params: "7B", description: "Alibaba's efficient 7B. Fast with excellent reasoning.", category: "general" },
+    { id: "mistralai/Mistral-7B-Instruct-v0.3", name: "Mistral 7B Instruct v0.3", size: "~14 GB", params: "7B", description: "Mistral AI's flagship 7B instruct model.", category: "general" },
+    { id: "mistralai/Mixtral-8x7B-v0.1", name: "Mixtral 8x7B MoE", size: "~93 GB", params: "46.7B MoE", description: "Mixture of Experts. Excellent quality via sparse activation.", category: "general" },
+    { id: "google/gemma-2-27b-it", name: "Gemma 2 27B Instruct", size: "~54 GB", params: "27B", description: "Google's 27B instruct model. Excellent instruction following.", category: "general" },
+    { id: "google/gemma-2-9b-it", name: "Gemma 2 9B Instruct", size: "~18 GB", params: "9B", description: "Google's efficient 9B model. Great balance of size and quality.", category: "general" },
+    { id: "Qwen/Qwen2.5-Coder-32B-Instruct", name: "Qwen 2.5 Coder 32B", size: "~65 GB", params: "32B", description: "Alibaba's best code model. Top-tier code generation.", category: "code" },
+    { id: "Qwen/Qwen2.5-Coder-14B-Instruct", name: "Qwen 2.5 Coder 14B", size: "~28 GB", params: "14B", description: "Alibaba's mid-sized code model. Strong coding capabilities.", category: "code" },
+    { id: "Qwen/Qwen2.5-Coder-7B-Instruct", name: "Qwen 2.5 Coder 7B", size: "~15 GB", params: "7B", description: "Alibaba's compact code model. Fast code completion.", category: "code" },
+    { id: "bigcode/starcoder2-15b", name: "StarCoder2 15B", size: "~30 GB", params: "15B", description: "BigCode's code generation model. Trained on The Stack v2.", category: "code" }
+  ];
+  electron.ipcMain.handle("airllm:getAvailableModels", async () => {
+    return AIRLLM_MODELS;
+  });
+  electron.ipcMain.handle("airllm:downloadModel", async (_event, modelId, targetDir) => {
+    return new Promise((resolve) => {
+      const scriptPath = path.join(__dirname, "..", "..", "src", "main", "python", "airllm_downloader.py");
+      const args = [scriptPath, modelId];
+      if (targetDir) args.push(targetDir);
+      airllmDownloadProcess = child_process.spawn("python", args, {
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      let lastError = "";
+      airllmDownloadProcess.stdout?.on("data", (data) => {
+        const lines = data.toString().split("\n").filter(Boolean);
+        for (const line of lines) {
+          try {
+            const msg = JSON.parse(line);
+            if (msg.type === "progress") {
+              mainWindow?.webContents.send("airllm:downloadProgress", {
+                progress: msg.progress,
+                speed: msg.speed,
+                downloaded: msg.downloaded,
+                total: msg.total
+              });
+            } else if (msg.type === "complete") {
+              resolve({ success: true, path: msg.path });
+            } else if (msg.type === "error") {
+              lastError = msg.message;
+            }
+          } catch {
+          }
+        }
+      });
+      airllmDownloadProcess.stderr?.on("data", (data) => {
+        lastError = data.toString().trim();
+      });
+      airllmDownloadProcess.on("close", (code) => {
+        airllmDownloadProcess = null;
+        if (code !== 0) {
+          resolve({ success: false, error: lastError || `Process exited with code ${code}` });
+        }
+      });
+      airllmDownloadProcess.on("error", (err) => {
+        airllmDownloadProcess = null;
+        resolve({ success: false, error: err.message });
+      });
+    });
+  });
+  electron.ipcMain.handle("airllm:cancelDownload", () => {
+    if (airllmDownloadProcess) {
+      airllmDownloadProcess.kill();
+      airllmDownloadProcess = null;
+    }
+  });
+  electron.ipcMain.handle("airllm:installDeps", async () => {
+    return new Promise((resolve) => {
+      const proc = child_process.spawn("python", ["-m", "pip", "install", "huggingface_hub", "airllm", "torch"], {
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      let outputText = "";
+      proc.stdout?.on("data", (data) => {
+        outputText += data.toString();
+        mainWindow?.webContents.send("airllm:installProgress", { status: data.toString().trim() });
+      });
+      proc.stderr?.on("data", (data) => {
+        outputText += data.toString();
+      });
+      proc.on("close", (code) => {
+        resolve({ success: code === 0, output: outputText });
+      });
+      proc.on("error", (err) => {
+        resolve({ success: false, output: err.message });
+      });
+    });
   });
   const binaryDownloader = new BinaryDownloader();
   electron.ipcMain.handle("binary:download", async (_event, targetDir) => {
@@ -2786,6 +3125,7 @@ electron.app.whenReady().then(() => {
 });
 electron.app.on("window-all-closed", () => {
   aiService?.stop();
+  airllmService?.stop();
   if (process.platform !== "darwin") {
     electron.app.quit();
   }

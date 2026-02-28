@@ -55,6 +55,10 @@ export interface AppSettings {
     chatMessages: ChatMessage[]
     standaloneChatSessions: ChatSession[]
     activeStandaloneChatId: string | null
+    aiBackend: 'llama' | 'airllm'
+    airllmModelId: string
+    airllmCompression: '4bit' | '8bit' | 'none'
+    airllmMaxLength: number
 }
 
 export type AppScreen = 'loading' | 'setup' | 'ide'
@@ -171,7 +175,11 @@ const defaultSettings: AppSettings = {
     lastActiveFile: null,
     chatMessages: [],
     standaloneChatSessions: [],
-    activeStandaloneChatId: null
+    activeStandaloneChatId: null,
+    aiBackend: 'llama' as const,
+    airllmModelId: 'Qwen/Qwen2.5-7B-Instruct',
+    airllmCompression: 'none' as const,
+    airllmMaxLength: 128
 }
 
 const initialState: AppState = {
