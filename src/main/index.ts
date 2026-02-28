@@ -509,6 +509,44 @@ function setupIPC(): void {
         return AIRLLM_MODELS
     })
 
+    ipcMain.handle('airllm:scanDownloaded', async (_event, modelsDir: string) => {
+        if (!modelsDir || !existsSync(modelsDir)) return []
+        try {
+            const entries = readdirSync(modelsDir, { withFileTypes: true })
+            const models: Array<{ name: string; path: string; size: string; id: string }> = []
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue
+                const folderPath = join(modelsDir, entry.name)
+                // Check if it looks like a HuggingFace model (has config.json or *.safetensors)
+                const contents = readdirSync(folderPath)
+                const isHFModel = contents.some(f => f === 'config.json' || f.endsWith('.safetensors') || f.endsWith('.bin'))
+                if (!isHFModel) continue
+                // Calculate folder size
+                let totalBytes = 0
+                function walkSize(dir: string) {
+                    try {
+                        for (const f of readdirSync(dir, { withFileTypes: true })) {
+                            const fp = join(dir, f.name)
+                            if (f.isDirectory()) walkSize(fp)
+                            else try { totalBytes += statSync(fp).size } catch { }
+                        }
+                    } catch { }
+                }
+                walkSize(folderPath)
+                const sizeGB = (totalBytes / (1024 ** 3)).toFixed(1)
+                // Convert folder name back to HF model ID (e.g. Qwen_Qwen2.5-7B-Instruct -> Qwen/Qwen2.5-7B-Instruct)
+                const modelId = entry.name.replace('_', '/')
+                models.push({
+                    name: entry.name.split('_').pop() || entry.name,
+                    path: folderPath,
+                    size: `${sizeGB} GB`,
+                    id: modelId
+                })
+            }
+            return models
+        } catch { return [] }
+    })
+
     ipcMain.handle('airllm:downloadModel', async (_event, modelId: string, targetDir: string) => {
         return new Promise((resolve) => {
             const scriptPath = join(__dirname, '..', '..', 'src', 'main', 'python', 'airllm_downloader.py')
@@ -528,12 +566,14 @@ function setupIPC(): void {
                         const msg = JSON.parse(line)
                         if (msg.type === 'progress') {
                             mainWindow?.webContents.send('airllm:downloadProgress', {
+                                modelId,
                                 progress: msg.progress,
                                 speed: msg.speed,
                                 downloaded: msg.downloaded,
                                 total: msg.total
                             })
                         } else if (msg.type === 'complete') {
+                            mainWindow?.webContents.send('airllm:downloadComplete', { modelId, path: msg.path })
                             resolve({ success: true, path: msg.path })
                         } else if (msg.type === 'error') {
                             lastError = msg.message
@@ -549,12 +589,15 @@ function setupIPC(): void {
             airllmDownloadProcess.on('close', (code) => {
                 airllmDownloadProcess = null
                 if (code !== 0) {
-                    resolve({ success: false, error: lastError || `Process exited with code ${code}` })
+                    const errorMsg = lastError || `Process exited with code ${code}`
+                    mainWindow?.webContents.send('airllm:downloadError', { modelId, error: errorMsg })
+                    resolve({ success: false, error: errorMsg })
                 }
             })
 
             airllmDownloadProcess.on('error', (err) => {
                 airllmDownloadProcess = null
+                mainWindow?.webContents.send('airllm:downloadError', { modelId, error: err.message })
                 resolve({ success: false, error: err.message })
             })
         })

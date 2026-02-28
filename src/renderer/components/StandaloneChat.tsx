@@ -77,6 +77,7 @@ export default function StandaloneChat() {
     const [switchingModel, setSwitchingModel] = useState(false)
     const [showModelDropdown, setShowModelDropdown] = useState(false)
     const dropdownRef = useRef<HTMLDivElement>(null)
+    const [downloadedAirllm, setDownloadedAirllm] = useState<Array<{ name: string; path: string; size: string; id: string }>>([])
 
     // File actions state
     const [fileActions, setFileActions] = useState<Record<string, FileAction>>({})
@@ -91,23 +92,7 @@ export default function StandaloneChat() {
         }
     }, [chatMessages, state.isStreaming])
 
-    // Stream listeners
-    useEffect(() => {
-        const unsubChunk = window.electronAPI.onStreamChunk((chunk) => {
-            streamContentRef.current += chunk
-            dispatch({ type: 'UPDATE_LAST_STANDALONE_ASSISTANT_MESSAGE', content: streamContentRef.current })
-        })
 
-        const unsubEnd = window.electronAPI.onStreamEnd(() => {
-            dispatch({ type: 'SET_STREAMING', isStreaming: false })
-            streamContentRef.current = ''
-        })
-
-        return () => {
-            unsubChunk()
-            unsubEnd()
-        }
-    }, [])
 
     // Watch for new user messages and trigger AI
     useEffect(() => {
@@ -123,6 +108,8 @@ export default function StandaloneChat() {
         try {
             const found = await window.electronAPI.scanLocalModels(state.settings.modelsDirectory)
             setModels(found)
+            const airllm = await window.electronAPI.scanDownloadedAirllm(state.settings.modelsDirectory)
+            setDownloadedAirllm(airllm)
         } catch (err) { /* ignore */ }
     }
 
@@ -194,6 +181,9 @@ export default function StandaloneChat() {
     }, [])
 
     async function sendToAI() {
+        dispatch({ type: 'SET_STREAMING', isStreaming: true })
+        dispatch({ type: 'SET_ACTIVE_STREAM_TARGET', target: 'standalone' })
+
         dispatch({
             type: 'ADD_STANDALONE_CHAT_MESSAGE',
             message: {
@@ -206,68 +196,13 @@ export default function StandaloneChat() {
 
         streamContentRef.current = ''
 
-        // --- RAG Retrieval & File Mentions ---
-        let context = ''
-        if (state.projectPath) {
-            context += `Project Root Absolute Path: ${state.projectPath}\n\n`
-        }
-        if (codebaseContext) {
-            context += codebaseContext + '\n\n'
-        }
-
-        const lastUserMsg = chatMessages.filter(m => m.role === 'user').pop()?.content || ''
-
-        // 1. Handle File Mentions (@)
-        const mentionRegex = /@([^\s]+)/g
-        const mentions = Array.from(lastUserMsg.matchAll(mentionRegex)) as RegExpMatchArray[]
-        let mentionedContent = ''
-
-        for (const match of mentions) {
-            const potentialPath = match[1]
-            const matchedFile = allFiles.find(f => f.endsWith(potentialPath) || f === potentialPath)
-
-            if (matchedFile) {
-                try {
-                    const result = await window.electronAPI.readFile(matchedFile)
-                    if (result.success) {
-                        mentionedContent += `\nFile: ${matchedFile}\n\`\`\`\n${result.content}\n\`\`\`\n`
-                    }
-                } catch (e) { /* skip unreadable files */ }
-            }
-        }
-
-        if (mentionedContent) {
-            context += `\n\nMentioned Files Context:\n${mentionedContent}`
-        }
-
-        // 2. RAG Retrieval (if project open)
-        if (state.projectPath) {
-            if (lastUserMsg) {
-                try {
-                    const snippets = await window.electronAPI.ragRetrieve(lastUserMsg)
-                    if (snippets && snippets.length > 0) {
-                        const references = snippets.map((s: any) => `File: ${s.id}\n${s.content}`).join('\n\n')
-                        context += `\n\nRelevant Code Snippets:\n${references}`
-                    }
-                } catch (e) { /* RAG retrieval failed silently */ }
-            }
-        }
-
-        const systemPrompt = context
-            ? PROMPTS.systemWithContext(context)
-            : PROMPTS.system
+        const systemPrompt = PROMPTS.standaloneSystem
 
         const chatLog = chatMessages
             .filter(m => m.role !== 'system')
             .map(m => ({ role: m.role, content: m.content }))
 
-        // Inject strict instruction into the very last user message
-        if (chatLog.length > 0) {
-            const lastMsg = chatLog[chatLog.length - 1]
-            if (lastMsg.role === 'user') {
-                lastMsg.content += `\n\n(IMPORTANT: If providing code for a file, YOU MUST use the \`\`\`FILE_ACTION:create:/path/to/file.ts format. DO NOT use standard markdown code blocks.)`
-            }
-        }
+
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -306,7 +241,6 @@ export default function StandaloneChat() {
                 updatedAt: Date.now()
             }
             dispatch({ type: 'ADD_STANDALONE_CHAT_SESSION', session: newSession })
-            dispatch({ type: 'SET_STREAMING', isStreaming: true })
             // the useEffect will trigger AI when chatMessages updates
         } else {
             dispatch({
@@ -326,7 +260,6 @@ export default function StandaloneChat() {
                     title: trimmed.substring(0, 30) + (trimmed.length > 30 ? '...' : '')
                 })
             }
-            dispatch({ type: 'SET_STREAMING', isStreaming: true })
         }
 
         setInput('')
@@ -636,7 +569,7 @@ export default function StandaloneChat() {
                                     <Sparkles size={48} strokeWidth={1} />
                                 </div>
                                 <h2>How can I help you today?</h2>
-                                <p>Ask anything about your code, or paste snippets to get started.</p>
+                                <p>Ask anything.</p>
                             </div>
                         )}
 
@@ -734,90 +667,110 @@ export default function StandaloneChat() {
                                     {showModelDropdown && (
                                         <div className="model-dropdown">
                                             {/* Backend toggle */}
-                                            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 4 }}>
+                                            <div style={{ display: 'flex', gap: 2, padding: '6px 6px 0', marginBottom: 4 }}>
                                                 <button
-                                                    className={`model-dropdown-item ${!isAirllm ? 'active' : ''}`}
-                                                    style={{ flex: 1, textAlign: 'center', padding: '6px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', color: !isAirllm ? 'var(--accent)' : 'var(--text-muted)', borderBottom: !isAirllm ? '2px solid var(--accent)' : '2px solid transparent' }}
                                                     onClick={async () => {
                                                         const newSettings = { ...state.settings, aiBackend: 'llama' as const }
                                                         await window.electronAPI.saveSettings(newSettings)
                                                         dispatch({ type: 'SET_SETTINGS', settings: newSettings })
                                                     }}
+                                                    style={{
+                                                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                                                        padding: '7px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                                        background: !isAirllm ? 'linear-gradient(135deg, rgba(168,160,255,0.15), rgba(124,108,240,0.1))' : 'transparent',
+                                                        border: !isAirllm ? '1px solid rgba(168,160,255,0.3)' : '1px solid transparent',
+                                                        borderRadius: 8, color: !isAirllm ? 'var(--accent-primary, #a8a0ff)' : 'var(--text-tertiary)',
+                                                        letterSpacing: '0.3px', transition: 'all 0.2s ease',
+                                                        boxShadow: !isAirllm ? '0 2px 8px rgba(124,108,240,0.12)' : 'none'
+                                                    }}
                                                 >
+                                                    <span style={{ fontSize: 12 }}>⚡</span>
                                                     llama.cpp
                                                 </button>
                                                 <button
-                                                    className={`model-dropdown-item ${isAirllm ? 'active' : ''}`}
-                                                    style={{ flex: 1, textAlign: 'center', padding: '6px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', color: isAirllm ? 'var(--accent)' : 'var(--text-muted)', borderBottom: isAirllm ? '2px solid var(--accent)' : '2px solid transparent' }}
                                                     onClick={async () => {
                                                         const newSettings = { ...state.settings, aiBackend: 'airllm' as const }
                                                         await window.electronAPI.saveSettings(newSettings)
                                                         dispatch({ type: 'SET_SETTINGS', settings: newSettings })
                                                     }}
+                                                    style={{
+                                                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                                                        padding: '7px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                                        background: isAirllm ? 'linear-gradient(135deg, rgba(0,200,255,0.12), rgba(168,160,255,0.1))' : 'transparent',
+                                                        border: isAirllm ? '1px solid rgba(0,200,255,0.25)' : '1px solid transparent',
+                                                        borderRadius: 8, color: isAirllm ? 'var(--accent-primary, #a8a0ff)' : 'var(--text-tertiary)',
+                                                        letterSpacing: '0.3px', transition: 'all 0.2s ease',
+                                                        boxShadow: isAirllm ? '0 2px 8px rgba(0,200,255,0.1)' : 'none'
+                                                    }}
                                                 >
+                                                    <span style={{ fontSize: 12 }}>🧠</span>
                                                     AirLLM
                                                 </button>
                                             </div>
 
                                             {isAirllm ? (
-                                                <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                    <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>HuggingFace Model ID</label>
-                                                    <input
-                                                        type="text"
-                                                        value={airllmModelId}
-                                                        onChange={(e) => setAirllmModelId(e.target.value)}
-                                                        placeholder="Qwen/Qwen2.5-7B-Instruct"
-                                                        style={{ padding: '5px 8px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: 'var(--text)', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' }}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                    <label style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Compression</label>
-                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                                    {downloadedAirllm.filter(m => !(state.downloadStatus.isDownloading && state.downloadStatus.modelId === m.id)).length > 0 ?
+                                                        downloadedAirllm.filter(m => !(state.downloadStatus.isDownloading && state.downloadStatus.modelId === m.id)).map((m) => (
+                                                            <div
+                                                                key={m.id}
+                                                                className={`model-dropdown-item ${state.settings.airllmModelId === m.id ? 'active' : ''}`}
+                                                                onClick={async () => {
+                                                                    setAirllmModelId(m.id)
+                                                                    setShowModelDropdown(false)
+                                                                    setSwitchingModel(true)
+                                                                    const newSettings = {
+                                                                        ...state.settings,
+                                                                        aiBackend: 'airllm' as const,
+                                                                        airllmModelId: m.id,
+                                                                        airllmCompression
+                                                                    }
+                                                                    await window.electronAPI.saveSettings(newSettings)
+                                                                    dispatch({ type: 'SET_SETTINGS', settings: newSettings })
+                                                                    try {
+                                                                        await window.electronAPI.stopAIServer()
+                                                                        const result = await window.electronAPI.startAIServer()
+                                                                        setSwitchingModel(false)
+                                                                        dispatch({ type: 'SET_AI_STATUS', status: result.success ? 'connected' : 'disconnected' })
+                                                                    } catch {
+                                                                        setSwitchingModel(false)
+                                                                        dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <span className="model-dropdown-name">{m.name}</span>
+                                                                <span className="model-dropdown-size">{m.size}</span>
+                                                            </div>
+                                                        )) : (
+                                                            <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+                                                                No AirLLM models downloaded yet. Download models from Settings.
+                                                            </div>
+                                                        )}
+                                                    {/* Compression selector */}
+                                                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                                        <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Precision:</span>
                                                         {(['4bit', '8bit', 'none'] as const).map((opt) => (
                                                             <button
                                                                 key={opt}
-                                                                onClick={(e) => { e.stopPropagation(); setAirllmCompression(opt) }}
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation()
+                                                                    setAirllmCompression(opt)
+                                                                    const newSettings = { ...state.settings, airllmCompression: opt }
+                                                                    await window.electronAPI.saveSettings(newSettings)
+                                                                    dispatch({ type: 'SET_SETTINGS', settings: newSettings })
+                                                                }}
                                                                 style={{
-                                                                    flex: 1, padding: '4px 0', borderRadius: 4, fontSize: 11, cursor: 'pointer',
-                                                                    border: airllmCompression === opt ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.12)',
-                                                                    background: airllmCompression === opt ? 'rgba(var(--accent-rgb, 99,102,241), 0.15)' : 'rgba(255,255,255,0.04)',
+                                                                    flex: 1, padding: '3px 0', borderRadius: 4, fontSize: 10, cursor: 'pointer',
+                                                                    border: airllmCompression === opt ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)',
+                                                                    background: airllmCompression === opt ? 'rgba(var(--accent-rgb, 99,102,241), 0.15)' : 'transparent',
                                                                     color: airllmCompression === opt ? 'var(--accent)' : 'var(--text-muted)',
                                                                     fontWeight: airllmCompression === opt ? 600 : 400
                                                                 }}
                                                             >
-                                                                {opt === 'none' ? 'None' : opt}
+                                                                {opt === 'none' ? 'FP16' : opt}
                                                             </button>
                                                         ))}
                                                     </div>
-                                                    <button
-                                                        onClick={async (e) => {
-                                                            e.stopPropagation()
-                                                            setShowModelDropdown(false)
-                                                            setSwitchingModel(true)
-                                                            const newSettings = {
-                                                                ...state.settings,
-                                                                aiBackend: 'airllm' as const,
-                                                                airllmModelId,
-                                                                airllmCompression
-                                                            }
-                                                            await window.electronAPI.saveSettings(newSettings)
-                                                            dispatch({ type: 'SET_SETTINGS', settings: newSettings })
-                                                            try {
-                                                                await window.electronAPI.stopAIServer()
-                                                                const result = await window.electronAPI.startAIServer()
-                                                                setSwitchingModel(false)
-                                                                dispatch({ type: 'SET_AI_STATUS', status: result.success ? 'connected' : 'disconnected' })
-                                                            } catch {
-                                                                setSwitchingModel(false)
-                                                                dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })
-                                                            }
-                                                        }}
-                                                        style={{
-                                                            marginTop: 4, padding: '6px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
-                                                            background: 'var(--accent)', color: '#fff', fontWeight: 600, fontSize: 12
-                                                        }}
-                                                    >
-                                                        Load Model
-                                                    </button>
                                                 </div>
                                             ) : (
                                                 <>
@@ -861,7 +814,7 @@ export default function StandaloneChat() {
                         </div>
                     </div>
                     <div className="standalone-footer-note">
-                        Quietly AI can make mistakes. Consider verifying code output.
+                        Quietly AI can make mistakes. Consider verifying responses.
                     </div>
                 </div>
             </div>

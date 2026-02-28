@@ -29,7 +29,7 @@ export default function TitleBar() {
                 <img src="./assets/logo.jpg" alt="QuietlyCode" className="titlebar-logo-img" />
                 <span>QuietlyCode</span>
 
-                {state.screen === 'ide' && (
+                {state.screen === 'ide' && state.viewMode === 'ide' && (
                     <div className="titlebar-menu" style={{ marginLeft: '12px' }}>
                         <button
                             className={`titlebar-menu-btn ${state.terminalVisible ? 'active' : ''}`}
@@ -43,21 +43,23 @@ export default function TitleBar() {
                 )}
             </div>
 
-            {/* IDE / Chat Toggle (Center) */}
+            {/* IDE / Chat Toggle (Center - absolutely positioned to prevent shifting) */}
             {state.screen === 'ide' && (
-                <div className="view-mode-toggle">
-                    <button
-                        className={`view-mode-btn ${state.viewMode === 'ide' ? 'active' : ''}`}
-                        onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: 'ide' })}
-                    >
-                        IDE
-                    </button>
-                    <button
-                        className={`view-mode-btn ${state.viewMode === 'chat' ? 'active' : ''}`}
-                        onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: 'chat' })}
-                    >
-                        Chat
-                    </button>
+                <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+                    <div className="view-mode-toggle">
+                        <button
+                            className={`view-mode-btn ${state.viewMode === 'ide' ? 'active' : ''}`}
+                            onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: 'ide' })}
+                        >
+                            IDE
+                        </button>
+                        <button
+                            className={`view-mode-btn ${state.viewMode === 'chat' ? 'active' : ''}`}
+                            onClick={() => dispatch({ type: 'SET_VIEW_MODE', mode: 'chat' })}
+                        >
+                            Chat
+                        </button>
+                    </div>
                 </div>
             )}
 

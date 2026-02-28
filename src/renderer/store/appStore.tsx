@@ -103,10 +103,13 @@ export interface AppState {
         speed: string
         modelId: string | null
         error: string | null
+        downloaded?: string
+        total?: string
     }
     pendingChatMention: string | null
     pendingChatContext: string | null
     problems: CodeProblem[]
+    activeStreamTarget: 'ide' | 'standalone' | null
 }
 
 export interface ContextMenuItem {
@@ -150,7 +153,7 @@ type Action =
     | { type: 'SET_CONTEXT_MENU'; menu: { x: number; y: number; items: ContextMenuItem[] } | null }
     | { type: 'TOGGLE_TERMINAL' }
     | { type: 'SET_DOWNLOAD_STATUS'; status: Partial<AppState['downloadStatus']> }
-    | { type: 'DOWNLOAD_PROGRESS'; progress: number; speed: string; modelId: string }
+    | { type: 'DOWNLOAD_PROGRESS'; progress: number; speed: string; modelId: string; downloaded?: string; total?: string }
     | { type: 'DOWNLOAD_COMPLETE'; modelId: string }
     | { type: 'DOWNLOAD_ERROR'; modelId: string; error: string }
     | { type: 'MENTION_FILE'; filename: string }
@@ -159,6 +162,8 @@ type Action =
     | { type: 'TOGGLE_QUICK_OPEN' }
     | { type: 'TOGGLE_SPLIT_EDITOR' }
     | { type: 'SET_SECONDARY_FILE'; path: string | null }
+    | { type: 'SET_ACTIVE_STREAM_TARGET'; target: 'ide' | 'standalone' | null }
+    | { type: 'APPEND_STREAM_CHUNK'; chunk: string; target: 'ide' | 'standalone' }
 
 const defaultSettings: AppSettings = {
     modelPath: '',
@@ -213,11 +218,14 @@ const initialState: AppState = {
         progress: 0,
         speed: '0 B/s',
         modelId: null,
-        error: null
+        error: null,
+        downloaded: '',
+        total: ''
     },
     pendingChatMention: null,
     pendingChatContext: null,
-    problems: []
+    problems: [],
+    activeStreamTarget: null
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -422,8 +430,10 @@ function reducer(state: AppState, action: Action): AppState {
                     isDownloading: true,
                     progress: action.progress,
                     speed: action.speed,
-                    modelId: action.modelId,
-                    error: null
+                    modelId: action.modelId || state.downloadStatus.modelId, // !! modelId is preserved !!
+                    error: null,
+                    downloaded: action.downloaded || state.downloadStatus.downloaded,
+                    total: action.total || state.downloadStatus.total
                 }
             }
 
@@ -434,9 +444,11 @@ function reducer(state: AppState, action: Action): AppState {
                     ...state.downloadStatus,
                     isDownloading: false,
                     progress: 100,
+                    error: null,
+                    downloaded: '',
+                    total: '',
                     speed: '0 B/s',
-                    modelId: null,
-                    error: null
+                    modelId: null
                 }
             }
 
@@ -481,6 +493,41 @@ function reducer(state: AppState, action: Action): AppState {
                     enabled: action.path !== null ? true : state.splitEditor.enabled
                 }
             }
+
+        case 'SET_ACTIVE_STREAM_TARGET':
+            return { ...state, activeStreamTarget: action.target }
+
+        case 'APPEND_STREAM_CHUNK': {
+            if (action.target === 'ide') {
+                const msgs = [...state.chatMessages]
+                if (msgs.length > 0) {
+                    const last = msgs[msgs.length - 1]
+                    if (last.role === 'assistant') {
+                        // Create a new message object to ensure React state detects the change
+                        msgs[msgs.length - 1] = { ...last, content: last.content + action.chunk }
+                    }
+                }
+                return { ...state, chatMessages: msgs }
+            } else {
+                if (!state.activeStandaloneChatId) return state
+                const sessions = [...state.standaloneChatSessions]
+                const activeIndex = sessions.findIndex(s => s.id === state.activeStandaloneChatId)
+                if (activeIndex >= 0) {
+                    const session = { ...sessions[activeIndex] }
+                    const msgs = [...session.messages]
+                    if (msgs.length > 0) {
+                        const last = msgs[msgs.length - 1]
+                        if (last.role === 'assistant') {
+                            msgs[msgs.length - 1] = { ...last, content: last.content + action.chunk }
+                        }
+                    }
+                    session.messages = msgs
+                    session.updatedAt = Date.now()
+                    sessions[activeIndex] = session
+                }
+                return { ...state, standaloneChatSessions: sessions }
+            }
+        }
 
         default:
             return state

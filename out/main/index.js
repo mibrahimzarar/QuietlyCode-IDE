@@ -2862,6 +2862,46 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
   electron.ipcMain.handle("airllm:getAvailableModels", async () => {
     return AIRLLM_MODELS;
   });
+  electron.ipcMain.handle("airllm:scanDownloaded", async (_event, modelsDir) => {
+    if (!modelsDir || !fs.existsSync(modelsDir)) return [];
+    try {
+      const entries = fs.readdirSync(modelsDir, { withFileTypes: true });
+      const models = [];
+      for (const entry of entries) {
+        let walkSize = function(dir) {
+          try {
+            for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+              const fp = path.join(dir, f.name);
+              if (f.isDirectory()) walkSize(fp);
+              else try {
+                totalBytes += fs.statSync(fp).size;
+              } catch {
+              }
+            }
+          } catch {
+          }
+        };
+        if (!entry.isDirectory()) continue;
+        const folderPath = path.join(modelsDir, entry.name);
+        const contents = fs.readdirSync(folderPath);
+        const isHFModel = contents.some((f) => f === "config.json" || f.endsWith(".safetensors") || f.endsWith(".bin"));
+        if (!isHFModel) continue;
+        let totalBytes = 0;
+        walkSize(folderPath);
+        const sizeGB = (totalBytes / 1024 ** 3).toFixed(1);
+        const modelId = entry.name.replace("_", "/");
+        models.push({
+          name: entry.name.split("_").pop() || entry.name,
+          path: folderPath,
+          size: `${sizeGB} GB`,
+          id: modelId
+        });
+      }
+      return models;
+    } catch {
+      return [];
+    }
+  });
   electron.ipcMain.handle("airllm:downloadModel", async (_event, modelId, targetDir) => {
     return new Promise((resolve) => {
       const scriptPath = path.join(__dirname, "..", "..", "src", "main", "python", "airllm_downloader.py");
@@ -2878,12 +2918,14 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
             const msg = JSON.parse(line);
             if (msg.type === "progress") {
               mainWindow?.webContents.send("airllm:downloadProgress", {
+                modelId,
                 progress: msg.progress,
                 speed: msg.speed,
                 downloaded: msg.downloaded,
                 total: msg.total
               });
             } else if (msg.type === "complete") {
+              mainWindow?.webContents.send("airllm:downloadComplete", { modelId, path: msg.path });
               resolve({ success: true, path: msg.path });
             } else if (msg.type === "error") {
               lastError = msg.message;
@@ -2898,11 +2940,14 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
       airllmDownloadProcess.on("close", (code) => {
         airllmDownloadProcess = null;
         if (code !== 0) {
-          resolve({ success: false, error: lastError || `Process exited with code ${code}` });
+          const errorMsg = lastError || `Process exited with code ${code}`;
+          mainWindow?.webContents.send("airllm:downloadError", { modelId, error: errorMsg });
+          resolve({ success: false, error: errorMsg });
         }
       });
       airllmDownloadProcess.on("error", (err) => {
         airllmDownloadProcess = null;
+        mainWindow?.webContents.send("airllm:downloadError", { modelId, error: err.message });
         resolve({ success: false, error: err.message });
       });
     });

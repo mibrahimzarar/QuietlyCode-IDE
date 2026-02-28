@@ -53,10 +53,13 @@ declare global {
 
             // AirLLM model downloader
             getAirllmModels: () => Promise<any[]>
+            scanDownloadedAirllm: (modelsDir: string) => Promise<Array<{ name: string; path: string; size: string; id: string }>>
             downloadAirllmModel: (modelId: string, targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>
             cancelAirllmDownload: () => Promise<void>
             installAirllmDeps: () => Promise<{ success: boolean; output: string }>
-            onAirllmDownloadProgress: (callback: (data: { progress: number; speed: string; downloaded: string; total: string }) => void) => () => void
+            onAirllmDownloadProgress: (callback: (data: { modelId: string; progress: number; speed: string; downloaded: string; total: string }) => void) => () => void
+            onAirllmDownloadComplete: (callback: (data: { modelId: string; path: string }) => void) => () => void
+            onAirllmDownloadError: (callback: (data: { modelId: string; error: string }) => void) => () => void
 
             // Binary downloader
             downloadBinary: (targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>

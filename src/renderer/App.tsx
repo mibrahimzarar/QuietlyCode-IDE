@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react'
+import React, { useEffect, useCallback, useState, useRef } from 'react'
 import { useApp } from './store/appStore'
 import SetupScreen from './components/SetupScreen'
 import TitleBar from './components/TitleBar'
@@ -188,6 +188,7 @@ export default function App() {
 
     // Download event listeners
     useEffect(() => {
+        // llama.cpp downloads
         const unsubscribeProgress = window.electronAPI.onDownloadProgress((data) => {
             dispatch({ type: 'DOWNLOAD_PROGRESS', progress: data.progress, speed: data.speed, modelId: data.modelId })
         })
@@ -198,10 +199,49 @@ export default function App() {
             dispatch({ type: 'DOWNLOAD_ERROR', modelId: data.modelId, error: data.error })
         })
 
+        // AirLLM downloads
+        const unsubAirllmProgress = window.electronAPI.onAirllmDownloadProgress((data) => {
+            dispatch({ type: 'DOWNLOAD_PROGRESS', progress: data.progress, speed: data.speed, modelId: data.modelId, downloaded: data.downloaded, total: data.total })
+        })
+        const unsubAirllmComplete = window.electronAPI.onAirllmDownloadComplete((data) => {
+            dispatch({ type: 'DOWNLOAD_COMPLETE', modelId: data.modelId })
+        })
+        const unsubAirllmError = window.electronAPI.onAirllmDownloadError((data) => {
+            dispatch({ type: 'DOWNLOAD_ERROR', modelId: data.modelId, error: data.error })
+        })
+
         return () => {
             unsubscribeProgress()
             unsubscribeComplete()
             unsubscribeError()
+            unsubAirllmProgress()
+            unsubAirllmComplete()
+            unsubAirllmError()
+        }
+    }, [])
+
+    // Global AI Stream Listener
+    const activeStreamTargetRef = useRef(state.activeStreamTarget)
+    useEffect(() => {
+        activeStreamTargetRef.current = state.activeStreamTarget
+    }, [state.activeStreamTarget])
+
+    useEffect(() => {
+        const unsubChunk = window.electronAPI.onStreamChunk((chunk) => {
+            const target = activeStreamTargetRef.current
+            if (target) {
+                dispatch({ type: 'APPEND_STREAM_CHUNK', chunk, target })
+            }
+        })
+
+        const unsubEnd = window.electronAPI.onStreamEnd(() => {
+            dispatch({ type: 'SET_STREAMING', isStreaming: false })
+            dispatch({ type: 'SET_ACTIVE_STREAM_TARGET', target: null })
+        })
+
+        return () => {
+            unsubChunk()
+            unsubEnd()
         }
     }, [])
 
@@ -315,7 +355,7 @@ export default function App() {
                     ) : state.screen === 'ide' ? (
                         <>
                             {state.viewMode === 'ide' ? (
-                                <div className="main-layout">
+                                <div key="ide-view" className="main-layout" style={{ animation: 'fadeInView 0.3s cubic-bezier(0.2, 0, 0, 1)' }}>
                                     {state.sidebarVisible && <Sidebar />}
                                     <div className="editor-area">
                                         <div className={`editor-main ${state.splitEditor.enabled ? 'split' : ''}`}>
@@ -376,7 +416,7 @@ export default function App() {
                                     {state.chatPanelVisible && <ChatPanel />}
                                 </div>
                             ) : (
-                                <div className="main-layout chat-mode-layout">
+                                <div key="chat-view" className="main-layout chat-mode-layout" style={{ animation: 'fadeInView 0.3s cubic-bezier(0.2, 0, 0, 1)' }}>
                                     <div className="editor-area standalone-chat-area">
                                         <StandaloneChat />
                                     </div>

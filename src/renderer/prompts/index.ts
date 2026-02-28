@@ -100,6 +100,8 @@ Follow these rules:
     - Explain what you're changing and why before the FILE_ACTION block
     - NEVER output plain code blocks for code intended to be saved. ALWAYS use FILE_ACTION
     - Only modify files the user has asked about or that are clearly relevant`,
+
+    standaloneSystem: `You are a helpful, conversational AI running locally. Answer the user's questions clearly, naturally, and concisely. You are not connected to any codebase, so if asked for code, simply output it in standard markdown blocks (e.g., \`\`\`javascript). Do not attempt to use any proprietary file action blocks or formatting.`,
 }
 
 export type PromptType = keyof typeof PROMPTS

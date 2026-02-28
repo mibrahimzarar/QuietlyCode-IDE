@@ -22,17 +22,12 @@ export default function SettingsPanel() {
     const [localModels, setLocalModels] = useState<Array<{ name: string; path: string; size: string }>>([])
     const [modelCategory, setModelCategory] = useState<'all' | 'bitnet' | 'small' | 'general' | 'code'>('all')
 
-    // AirLLM download state
+    // AirLLM catalog state (not download status)
     const [airllmCatalog, setAirllmCatalog] = useState<Array<{ id: string; name: string; size: string; params?: string; description: string; category: string }>>([])
-    const [airllmDownloading, setAirllmDownloading] = useState(false)
-    const [airllmProgress, setAirllmProgress] = useState(0)
-    const [airllmSpeed, setAirllmSpeed] = useState('')
-    const [airllmDownloaded, setAirllmDownloaded] = useState('')
-    const [airllmTotal, setAirllmTotal] = useState('')
-    const [airllmError, setAirllmError] = useState('')
     const [selectedAirllmId, setSelectedAirllmId] = useState<string | null>(null)
 
-    const { isDownloading, progress, speed, modelId: downloadingModelId, error: downloadError } = state.downloadStatus
+    // Global download state
+    const { isDownloading, progress, speed, modelId: downloadingModelId, error: downloadError, downloaded, total } = state.downloadStatus
 
     useEffect(() => {
         setLocal({ ...state.settings })
@@ -45,16 +40,6 @@ export default function SettingsPanel() {
             scanModels(state.settings.modelsDirectory)
         }
     }, [state.settings.modelsDirectory])
-
-    useEffect(() => {
-        const unsub = window.electronAPI.onAirllmDownloadProgress?.((data) => {
-            setAirllmProgress(data.progress)
-            setAirllmSpeed(data.speed)
-            setAirllmDownloaded(data.downloaded)
-            setAirllmTotal(data.total)
-        })
-        return () => { unsub?.() }
-    }, [])
 
     // Listen for download completion to refresh local models
     useEffect(() => {
@@ -214,16 +199,7 @@ export default function SettingsPanel() {
                         <div className="settings-group">
                             <div className="settings-group-title">AirLLM Configuration</div>
 
-                            <div className="setting-field">
-                                <label>HuggingFace Model ID</label>
-                                <div className="hint">e.g. Qwen/Qwen2.5-7B-Instruct, mistralai/Mistral-7B-v0.1</div>
-                                <input
-                                    type="text"
-                                    value={local.airllmModelId || ''}
-                                    onChange={(e) => handleChange('airllmModelId', e.target.value)}
-                                    placeholder="Qwen/Qwen2.5-7B-Instruct"
-                                />
-                            </div>
+
 
                             <div className="setting-field">
                                 <label>Compression</label>
@@ -283,31 +259,31 @@ export default function SettingsPanel() {
                             <div className="settings-group-title">Download AirLLM Models</div>
 
                             {/* Download progress */}
-                            {airllmDownloading && (
+                            {isDownloading && downloadingModelId === selectedAirllmId && (
                                 <div className="active-download-card">
                                     <div className="active-download-info">
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <Loader size={14} className="spinner" />
-                                            <span className="active-download-name">{selectedAirllmId || 'Downloading...'}</span>
+                                            <span className="active-download-name">{downloadingModelId}</span>
                                         </div>
                                         <div className="active-download-stats">
-                                            <span>{airllmDownloaded} / {airllmTotal}</span>
-                                            <span>{airllmSpeed}</span>
+                                            <span>{downloaded} / {total}</span>
+                                            <span>{speed}</span>
                                         </div>
                                     </div>
                                     <div className="ws-progress-bar" style={{ height: 6, borderRadius: 3, background: 'var(--bg-primary)', marginTop: 8 }}>
-                                        <div className="ws-progress-fill" style={{ width: `${airllmProgress}%`, height: '100%', borderRadius: 3, background: 'var(--accent-gradient)', transition: 'width 0.3s ease' }} />
+                                        <div className="ws-progress-fill" style={{ width: `${progress}%`, height: '100%', borderRadius: 3, background: 'var(--accent-gradient)', transition: 'width 0.3s ease' }} />
                                     </div>
-                                    <button className="btn btn-ghost btn-sm" onClick={() => { window.electronAPI.cancelAirllmDownload(); setAirllmDownloading(false) }} style={{ marginTop: 8, width: '100%' }}>
+                                    <button className="btn btn-ghost btn-sm" onClick={() => { window.electronAPI.cancelAirllmDownload() }} style={{ marginTop: 8, width: '100%' }}>
                                         Cancel
                                     </button>
                                 </div>
                             )}
 
-                            {airllmError && (
+                            {downloadError && downloadingModelId === selectedAirllmId && (
                                 <div className="hint" style={{ color: 'var(--error)', marginTop: 4, marginBottom: 8 }}>
                                     <AlertCircle size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                                    {airllmError}
+                                    {downloadError}
                                 </div>
                             )}
 
@@ -315,7 +291,7 @@ export default function SettingsPanel() {
                                 {airllmCatalog.map((model) => (
                                     <div
                                         key={model.id}
-                                        className={`model-manager-item downloadable ${selectedAirllmId === model.id ? 'selected' : ''} ${local.airllmModelId === model.id ? 'active' : ''}`}
+                                        className={`model-manager-item downloadable ${selectedAirllmId === model.id ? 'active' : ''}`}
                                         onClick={() => { setSelectedAirllmId(model.id); handleChange('airllmModelId', model.id) }}
                                     >
                                         <div className="model-manager-item-info">
@@ -331,20 +307,15 @@ export default function SettingsPanel() {
                                 ))}
                             </div>
 
-                            {selectedAirllmId && !airllmDownloading && local.modelsDirectory && (
+                            {selectedAirllmId && (!isDownloading || downloadingModelId !== selectedAirllmId) && local.modelsDirectory && (
                                 <button
                                     className="btn btn-primary"
                                     onClick={async () => {
-                                        setAirllmDownloading(true)
-                                        setAirllmError('')
-                                        setAirllmProgress(0)
-                                        const result = await window.electronAPI.downloadAirllmModel(selectedAirllmId, local.modelsDirectory)
-                                        setAirllmDownloading(false)
-                                        if (!result.success) {
-                                            setAirllmError(result.error || 'Download failed')
-                                        }
+                                        dispatch({ type: 'DOWNLOAD_PROGRESS', modelId: selectedAirllmId, progress: 0, speed: 'Starting...' })
+                                        window.electronAPI.downloadAirllmModel(selectedAirllmId, local.modelsDirectory)
                                     }}
                                     style={{ marginTop: 8, width: '100%' }}
+                                    disabled={isDownloading}
                                 >
                                     <Download size={14} /> Download Selected Model
                                 </button>
@@ -514,7 +485,7 @@ export default function SettingsPanel() {
                                             .map((model) => (
                                                 <div
                                                     key={model.id}
-                                                    className={`model-manager-item downloadable ${selectedModelId === model.id ? 'selected' : ''}`}
+                                                    className={`model-manager-item downloadable ${selectedModelId === model.id ? 'active' : ''}`}
                                                     onClick={() => !isDownloading && setSelectedModelId(model.id)}
                                                 >
                                                     <div className="model-manager-item-info">

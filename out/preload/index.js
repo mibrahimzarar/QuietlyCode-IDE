@@ -55,6 +55,7 @@ const electronAPI = {
   deleteModel: (path) => electron.ipcRenderer.invoke("models:delete", path),
   // AirLLM model downloader
   getAirllmModels: () => electron.ipcRenderer.invoke("airllm:getAvailableModels"),
+  scanDownloadedAirllm: (modelsDir) => electron.ipcRenderer.invoke("airllm:scanDownloaded", modelsDir),
   downloadAirllmModel: (modelId, targetDir) => electron.ipcRenderer.invoke("airllm:downloadModel", modelId, targetDir),
   cancelAirllmDownload: () => electron.ipcRenderer.invoke("airllm:cancelDownload"),
   installAirllmDeps: () => electron.ipcRenderer.invoke("airllm:installDeps"),
@@ -62,6 +63,16 @@ const electronAPI = {
     const listener = (_event, data) => callback(data);
     electron.ipcRenderer.on("airllm:downloadProgress", listener);
     return () => electron.ipcRenderer.removeListener("airllm:downloadProgress", listener);
+  },
+  onAirllmDownloadComplete: (callback) => {
+    const listener = (_event, data) => callback(data);
+    electron.ipcRenderer.on("airllm:downloadComplete", listener);
+    return () => electron.ipcRenderer.removeListener("airllm:downloadComplete", listener);
+  },
+  onAirllmDownloadError: (callback) => {
+    const listener = (_event, data) => callback(data);
+    electron.ipcRenderer.on("airllm:downloadError", listener);
+    return () => electron.ipcRenderer.removeListener("airllm:downloadError", listener);
   },
   onDownloadProgress: (callback) => {
     const listener = (_event, data) => callback(data);
