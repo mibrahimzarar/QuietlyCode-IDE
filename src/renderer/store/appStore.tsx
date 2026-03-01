@@ -57,7 +57,7 @@ export interface AppSettings {
     activeStandaloneChatId: string | null
     aiBackend: 'llama' | 'airllm'
     airllmModelId: string
-    airllmCompression: '4bit' | '8bit' | 'none'
+    airllmCompression: '4bit' | '8bit'
     airllmMaxLength: number
 }
 
@@ -183,7 +183,7 @@ const defaultSettings: AppSettings = {
     activeStandaloneChatId: null,
     aiBackend: 'llama' as const,
     airllmModelId: 'Qwen/Qwen2.5-7B-Instruct',
-    airllmCompression: 'none' as const,
+    airllmCompression: '4bit' as const,
     airllmMaxLength: 128
 }
 

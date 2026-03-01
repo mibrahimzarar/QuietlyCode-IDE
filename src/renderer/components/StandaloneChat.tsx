@@ -133,8 +133,7 @@ export default function StandaloneChat() {
 
     // AirLLM config state
     const [airllmModelId, setAirllmModelId] = useState(state.settings.airllmModelId || 'Qwen/Qwen2.5-7B-Instruct')
-    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit' | 'none'>(state.settings.airllmCompression || 'none')
-
+    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit'>(state.settings.airllmCompression || '4bit')
     const currentModelName = isAirllm
         ? (state.settings.airllmModelId?.split('/').pop() || 'AirLLM')
         : state.settings.modelPath
@@ -749,7 +748,7 @@ export default function StandaloneChat() {
                                                     {/* Compression selector */}
                                                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                                                         <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Precision:</span>
-                                                        {(['4bit', '8bit', 'none'] as const).map((opt) => (
+                                                        {(['4bit', '8bit'] as const).map((opt) => (
                                                             <button
                                                                 key={opt}
                                                                 onClick={async (e) => {
@@ -767,7 +766,7 @@ export default function StandaloneChat() {
                                                                     fontWeight: airllmCompression === opt ? 600 : 400
                                                                 }}
                                                             >
-                                                                {opt === 'none' ? 'FP16' : opt}
+                                                                {opt}
                                                             </button>
                                                         ))}
                                                     </div>

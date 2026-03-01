@@ -2958,6 +2958,40 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
       airllmDownloadProcess = null;
     }
   });
+  electron.ipcMain.handle("models:getPendingDownloads", async (_event, modelsDir) => {
+    if (!modelsDir || !fs.existsSync(modelsDir)) return [];
+    const pending = [];
+    try {
+      const entries = fs.readdirSync(modelsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith(".part")) {
+          const originalFilename = entry.name.slice(0, -5);
+          const model = modelDownloader.getAvailableModels().find((m) => m.filename === originalFilename);
+          if (model) {
+            pending.push({ id: model.id, type: "llama" });
+          }
+        }
+        if (entry.isDirectory()) {
+          const folderPath = path.join(modelsDir, entry.name);
+          const contents = fs.readdirSync(folderPath);
+          const possibleId = entry.name.replace("_", "/");
+          const isAirllmModel = AIRLLM_MODELS.some((m) => m.id === possibleId) || possibleId.includes("/");
+          if (isAirllmModel) {
+            const isComplete = contents.some((f) => f === "config.json" || f === "model.safetensors.index.json");
+            const hasCache = contents.some((f) => f === ".cache" || f.includes(".incomplete"));
+            if (!isComplete || hasCache) {
+              if (AIRLLM_MODELS.some((m) => m.id === possibleId)) {
+                pending.push({ id: possibleId, type: "airllm" });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error scanning pending downloads:", err);
+    }
+    return pending;
+  });
   electron.ipcMain.handle("airllm:installDeps", async () => {
     return new Promise((resolve) => {
       const proc = child_process.spawn("python", ["-m", "pip", "install", "huggingface_hub", "airllm", "torch"], {

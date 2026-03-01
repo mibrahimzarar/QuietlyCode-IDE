@@ -113,14 +113,28 @@ export default function App() {
                         }).catch(() => { /* skip if folder no longer exists */ })
                     }
 
-                    // ── Background: scan models ──
+                    // ── Background: scan models & resume incomplete downloads ──
                     if (settings.modelsDirectory) {
                         window.electronAPI.scanLocalModels(settings.modelsDirectory).catch(() => { })
+
+                        // Auto-resume incomplete downloads
+                        window.electronAPI.getPendingDownloads(settings.modelsDirectory)
+                            .then((pending: Array<{ id: string; type: 'llama' | 'airllm' }>) => {
+                                pending.forEach(dl => {
+                                    dispatch({ type: 'DOWNLOAD_PROGRESS', progress: 0, speed: 'Resuming...', modelId: dl.id })
+                                    if (dl.type === 'llama') {
+                                        window.electronAPI.downloadModel(dl.id, settings.modelsDirectory)
+                                    } else {
+                                        window.electronAPI.downloadAirllmModel(dl.id, settings.modelsDirectory)
+                                    }
+                                })
+                            })
+                            .catch((err: any) => console.error('Failed to get pending downloads:', err))
                     }
 
                     // ── Background: start AI server ──
                     dispatch({ type: 'SET_AI_STATUS', status: 'connecting' })
-                    window.electronAPI.startAIServer().then((aiResult) => {
+                    window.electronAPI.startAIServer().then((aiResult: any) => {
                         dispatch({ type: 'SET_AI_STATUS', status: aiResult.success ? 'connected' : 'disconnected' })
                     }).catch(() => {
                         dispatch({ type: 'SET_AI_STATUS', status: 'disconnected' })

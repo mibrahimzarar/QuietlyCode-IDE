@@ -53,6 +53,7 @@ const electronAPI = {
   cancelDownload: () => electron.ipcRenderer.invoke("models:cancelDownload"),
   scanLocalModels: (directory) => electron.ipcRenderer.invoke("models:scanLocal", directory),
   deleteModel: (path) => electron.ipcRenderer.invoke("models:delete", path),
+  getPendingDownloads: (modelsDir) => electron.ipcRenderer.invoke("models:getPendingDownloads", modelsDir),
   // AirLLM model downloader
   getAirllmModels: () => electron.ipcRenderer.invoke("airllm:getAvailableModels"),
   scanDownloadedAirllm: (modelsDir) => electron.ipcRenderer.invoke("airllm:scanDownloaded", modelsDir),

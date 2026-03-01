@@ -57,6 +57,7 @@ declare global {
             downloadAirllmModel: (modelId: string, targetDir: string) => Promise<{ success: boolean; path?: string; error?: string }>
             cancelAirllmDownload: () => Promise<void>
             installAirllmDeps: () => Promise<{ success: boolean; output: string }>
+            getPendingDownloads: (modelsDir: string) => Promise<Array<{ id: string; type: 'llama' | 'airllm' }>>
             onAirllmDownloadProgress: (callback: (data: { modelId: string; progress: number; speed: string; downloaded: string; total: string }) => void) => () => void
             onAirllmDownloadComplete: (callback: (data: { modelId: string; path: string }) => void) => () => void
             onAirllmDownloadError: (callback: (data: { modelId: string; error: string }) => void) => () => void

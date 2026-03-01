@@ -70,11 +70,6 @@ export default function StatusBar() {
                         </span>
                     )}
                 </div>
-                {state.projectPath && (
-                    <div className="status-item">
-                        <span>{state.projectPath.split(/[/\\]/).pop()}</span>
-                    </div>
-                )}
             </div>
             <div className="status-right">
                 {activeFile && (

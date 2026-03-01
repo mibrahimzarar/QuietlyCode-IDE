@@ -610,6 +610,69 @@ function setupIPC(): void {
         }
     })
 
+    // --- Pending Downloads ---
+    ipcMain.handle('models:getPendingDownloads', async (_event, modelsDir: string) => {
+        if (!modelsDir || !existsSync(modelsDir)) return []
+
+        const pending: Array<{ id: string; type: 'llama' | 'airllm' }> = []
+        try {
+            const entries = readdirSync(modelsDir, { withFileTypes: true })
+
+            for (const entry of entries) {
+                // 1. Check for llama partial downloads (.part)
+                if (entry.isFile() && entry.name.endsWith('.part')) {
+                    const originalFilename = entry.name.slice(0, -5) // remove .part
+                    const model = modelDownloader.getAvailableModels().find(m => m.filename === originalFilename)
+                    if (model) {
+                        pending.push({ id: model.id, type: 'llama' })
+                    }
+                }
+
+                // 2. Check for AirLLM partial downloads
+                // AirLLM folders are created when download starts.
+                // A complete HF model usually has a config.json. If it misses it, or has temporary files, it's pending.
+                if (entry.isDirectory()) {
+                    const folderPath = join(modelsDir, entry.name)
+                    const contents = readdirSync(folderPath)
+
+                    // HF snapshot_download uses a .cache folder or creates blobs/snapshots.
+                    // If we find a model directory that belongs to AirLLM but lacks config.json,
+                    // or possesses signs of partial download like a `.incomplete` file or locking, we consider it pending.
+                    // Another reliable way: convert folder name back to HF model ID
+                    const possibleId = entry.name.replace('_', '/')
+                    const isAirllmModel = AIRLLM_MODELS.some(m => m.id === possibleId) || possibleId.includes('/')
+
+                    if (isAirllmModel) {
+                        // Check if fully complete. A simple heuristic is looking for standard model files.
+                        // Wait, a better way for huggingface_hub is that if it completed successfully, 
+                        // all symlinks in snapshots are fully resolved and it contains config.json etc.
+                        // However, snapshot_download will resume automatically. We just need to trigger it.
+                        // Actually, if it's in the Models list normally (using airllm:scanDownloaded), it's complete.
+                        // If it's incomplete, `airllm:scanDownloaded` might still pick it up if there's any JSON/bin file.
+                        // Let's refine: HF cache puts everything in `.cache/huggingface/hub/models--...`
+                        // Wait, our airllm downloader sets `local_dir_use_symlinks=False` and `local_dir=folderPath`.
+                        // So huggingface_hub downloads into a `.cache` subfolder inside that target or directly writes `.incomplete` files.
+                        // Let's check for `.cache` or lack of `config.json`.
+                        const isComplete = contents.some(f => f === 'config.json' || f === 'model.safetensors.index.json')
+                        const hasCache = contents.some(f => f === '.cache' || f.includes('.incomplete'))
+
+                        // Wait, a better check: if it's NOT considered 'complete' by the UI, the UI wouldn't show it.
+                        if (!isComplete || hasCache) {
+                            // It's an incomplete AirLLM download
+                            // We should resume it. But to be safe, only resume if it matches a known format
+                            if (AIRLLM_MODELS.some(m => m.id === possibleId)) {
+                                pending.push({ id: possibleId, type: 'airllm' })
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Error scanning pending downloads:', err)
+        }
+        return pending
+    })
+
     ipcMain.handle('airllm:installDeps', async () => {
         return new Promise((resolve) => {
             const proc = spawn('python', ['-m', 'pip', 'install', 'huggingface_hub', 'airllm', 'torch'], {

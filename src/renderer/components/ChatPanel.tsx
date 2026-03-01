@@ -81,7 +81,7 @@ export default function ChatPanel() {
     // AirLLM state
     const isAirllm = state.settings.aiBackend === 'airllm'
     const [airllmModelId, setAirllmModelId] = useState(state.settings.airllmModelId || 'Qwen/Qwen2.5-7B-Instruct')
-    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit' | 'none'>(state.settings.airllmCompression || 'none')
+    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit'>(state.settings.airllmCompression || '4bit')
     const [downloadedAirllm, setDownloadedAirllm] = useState<Array<{ name: string; path: string; size: string; id: string }>>([])
 
     // File actions state
@@ -769,7 +769,7 @@ export default function ChatPanel() {
                                             {/* Compression selector */}
                                             <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                                                 <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Precision:</span>
-                                                {(['4bit', '8bit', 'none'] as const).map((opt) => (
+                                                {(['4bit', '8bit'] as const).map((opt) => (
                                                     <button
                                                         key={opt}
                                                         onClick={async (e) => {
@@ -787,7 +787,7 @@ export default function ChatPanel() {
                                                             fontWeight: airllmCompression === opt ? 600 : 400
                                                         }}
                                                     >
-                                                        {opt === 'none' ? 'FP16' : opt}
+                                                        {opt}
                                                     </button>
                                                 ))}
                                             </div>

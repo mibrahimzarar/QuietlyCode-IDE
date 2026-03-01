@@ -38,7 +38,7 @@ export default function SetupScreen() {
 
     // AirLLM state
     const [airllmModelId, setAirllmModelId] = useState('Qwen/Qwen2.5-7B-Instruct')
-    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit' | 'none'>('4bit')
+    const [airllmCompression, setAirllmCompression] = useState<'4bit' | '8bit'>('4bit')
     const [airllmModels, setAirllmModels] = useState<Array<{ id: string; name: string; size: string; params?: string; description: string; category: string }>>([])
     const [selectedAirllmModel, setSelectedAirllmModel] = useState<string | null>(null)
     const [airllmDownloading, setAirllmDownloading] = useState(false)
@@ -398,14 +398,14 @@ export default function SetupScreen() {
                                 <div className="ws-field" style={{ marginTop: 8 }}>
                                     <label>Compression</label>
                                     <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                                        {(['4bit', '8bit', 'none'] as const).map((opt) => (
+                                        {(['4bit', '8bit'] as const).map((opt) => (
                                             <button
                                                 key={opt}
                                                 className={`ws-btn ${airllmCompression === opt ? 'ws-btn-primary' : 'ws-btn-ghost'}`}
                                                 style={{ flex: 1 }}
                                                 onClick={() => setAirllmCompression(opt)}
                                             >
-                                                {opt === 'none' ? 'None (FP16)' : opt}
+                                                {opt}
                                             </button>
                                         ))}
                                     </div>
