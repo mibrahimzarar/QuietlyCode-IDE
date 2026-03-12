@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useRef } from 'react'
+import React, { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import { useApp } from './store/appStore'
 import SetupScreen from './components/SetupScreen'
 import TitleBar from './components/TitleBar'
@@ -22,19 +22,23 @@ export default function App() {
     const [bottomTab, setBottomTab] = React.useState<'terminal' | 'problems' | 'debug'>('terminal')
     const [isBottomPanelMaximized, setIsBottomPanelMaximized] = React.useState(false)
     const [isInitializing, setIsInitializing] = useState(true)
+    const lintTimerRef = useRef<NodeJS.Timeout | null>(null)
+    const sessionSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
     const toggleBottomPanelMaximized = useCallback(() => {
         setIsBottomPanelMaximized(prev => !prev)
     }, [])
 
-
-    // Performance optimization: debounce project-wide linting
-    const runLinting = useCallback(async () => {
+    // Debounced project-wide linting — waits 2s after last save before running tsc
+    const runLinting = useCallback(() => {
         if (!state.projectPath) return
-        const result = await window.electronAPI.lintCodebase(state.projectPath)
-        if (result.success && result.problems) {
-            dispatch({ type: 'SET_PROBLEMS', problems: result.problems })
-        }
+        if (lintTimerRef.current) clearTimeout(lintTimerRef.current)
+        lintTimerRef.current = setTimeout(async () => {
+            const result = await window.electronAPI.lintCodebase(state.projectPath!)
+            if (result.success && result.problems) {
+                dispatch({ type: 'SET_PROBLEMS', problems: result.problems })
+            }
+        }, 2000)
     }, [state.projectPath, dispatch])
 
     // Run linting on initial project load
@@ -90,7 +94,7 @@ export default function App() {
                                     try {
                                         const result = await window.electronAPI.readFile(filePath)
                                         if (result.success && result.content !== undefined) {
-                                            const name = filePath.split('\\').pop() || filePath
+                                            const name = filePath.split(/[\\/]/).pop() || filePath
                                             const ext = name.split('.').pop()?.toLowerCase() || ''
                                             dispatch({
                                                 type: 'OPEN_FILE',
@@ -156,25 +160,21 @@ export default function App() {
         initApp()
     }, [])
 
-    // Save session when it changes
+    // Save session when it changes — debounced to avoid thrashing disk on every stream chunk
     useEffect(() => {
-        if (state.screen === 'ide') {
-            const lastProjectPath = state.projectPath
-            const lastOpenFiles = state.openFiles.map(f => f.path)
-            const lastActiveFile = state.activeFilePath
-            const chatMessages = state.chatMessages
-            const standaloneChatSessions = state.standaloneChatSessions
-
+        if (state.screen !== 'ide') return
+        if (sessionSaveTimerRef.current) clearTimeout(sessionSaveTimerRef.current)
+        sessionSaveTimerRef.current = setTimeout(() => {
             window.electronAPI.saveSettings({
-                lastProjectPath,
-                lastOpenFiles,
-                lastActiveFile,
-                chatMessages,
-                standaloneChatSessions
+                lastProjectPath: state.projectPath,
+                lastOpenFiles: state.openFiles.map(f => f.path),
+                lastActiveFile: state.activeFilePath,
+                chatMessages: state.chatMessages,
+                standaloneChatSessions: state.standaloneChatSessions
             }).catch(err => {
                 console.error('Failed to save session settings:', err)
             })
-        }
+        }, 1500)
     }, [state.projectPath, state.openFiles.length, state.activeFilePath, state.chatMessages, state.standaloneChatSessions, state.screen])
 
     // Apply theme
@@ -341,7 +341,7 @@ export default function App() {
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [state.showCommandPalette, state.showSettings, state.diffPreview, state.contextMenu, saveActiveFile, dispatch, state.showCommandPalette])
+    }, [state.showCommandPalette, state.showSettings, state.diffPreview, state.contextMenu, state.showQuickOpen, saveActiveFile, dispatch])
 
 
     return (

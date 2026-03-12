@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState } from 'react'
+import React, { useRef, useCallback, useState, useEffect } from 'react'
 import MonacoEditor, { OnMount } from '@monaco-editor/react'
 import { useApp } from '../store/appStore'
 import { PROMPTS } from '../prompts'
@@ -6,9 +6,6 @@ import { Code2 } from 'lucide-react'
 import EditPalette from './EditPalette'
 import FindWidget from './FindWidget'
 import HoverTooltip from './HoverTooltip'
-
-// Track inline completion provider to prevent leak on remount
-let inlineProviderDisposable: any = null
 
 interface EditorProps {
     isSecondary?: boolean
@@ -18,6 +15,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
     const { state, dispatch } = useApp()
     const editorRef = useRef<any>(null)
     const monacoRef = useRef<any>(null)
+    const inlineProviderRef = useRef<any>(null)
     const [editPalettePos, setEditPalettePos] = useState<{
         x: number,
         y: number,
@@ -190,7 +188,7 @@ export default function Editor({ isSecondary = false }: EditorProps) {
                             if (filePath !== activeFile.path) {
                                 const fileResult = await window.electronAPI.readFile(filePath)
                                 if (fileResult.success && fileResult.content !== undefined) {
-                                    const name = filePath.split('\\').pop() || filePath
+                                    const name = filePath.split(/[\\/]/).pop() || filePath
                                     const ext = name.split('.').pop()?.toLowerCase() || ''
                                     const langMap: Record<string, string> = {
                                         ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
@@ -305,9 +303,9 @@ export default function Editor({ isSecondary = false }: EditorProps) {
 
         // Setup Inline Autocomplete (Ghost text)
         let debounceTimer: NodeJS.Timeout
-        // Dispose previous provider to prevent leak on remount
-        if (inlineProviderDisposable) inlineProviderDisposable.dispose()
-        inlineProviderDisposable = monaco.languages.registerInlineCompletionsProvider('*', {
+        // Dispose previous provider for this editor instance before registering new one
+        if (inlineProviderRef.current) inlineProviderRef.current.dispose()
+        inlineProviderRef.current = monaco.languages.registerInlineCompletionsProvider('*', {
             provideInlineCompletions: async (model, position, context, token) => {
                 // Only trigger occasionally if user stopped typing to avoid spamming the local LLM
                 return new Promise((resolve) => {
@@ -379,8 +377,17 @@ export default function Editor({ isSecondary = false }: EditorProps) {
             }
         })
 
-        // Cleanup when component unmounts (but we don't have unmount hook easily accessible here, it's fine for simple use cases)
     }
+
+    // Cleanup inline completion provider on unmount
+    useEffect(() => {
+        return () => {
+            if (inlineProviderRef.current) {
+                inlineProviderRef.current.dispose()
+                inlineProviderRef.current = null
+            }
+        }
+    }, [])
 
     const handleChange = useCallback((value: string | undefined) => {
         if (value !== undefined && activeFile) {

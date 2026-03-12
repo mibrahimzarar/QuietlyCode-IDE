@@ -86,7 +86,8 @@ export default function Sidebar() {
 
     async function createNewItem() {
         if (!newItemName || !newItemParent || !newItemMode) return
-        const path = `${newItemParent}\\${newItemName}`
+        const sep = newItemParent.includes('/') ? '/' : '\\'
+        const path = `${newItemParent}${sep}${newItemName}`
         const result = newItemMode === 'file'
             ? await window.electronAPI.createFile(path)
             : await window.electronAPI.createFolder(path)
@@ -107,8 +108,9 @@ export default function Sidebar() {
 
     async function handleRename(oldPath: string) {
         if (!renameValue || !state.projectPath) return
-        const dir = oldPath.substring(0, oldPath.lastIndexOf('\\'))
-        const newPath = `${dir}\\${renameValue}`
+        const sep = oldPath.includes('/') ? '/' : '\\'
+        const dir = oldPath.substring(0, oldPath.lastIndexOf(sep))
+        const newPath = `${dir}${sep}${renameValue}`
         const result = await window.electronAPI.renameFile(oldPath, newPath)
         if (result.success) {
             const tree = await window.electronAPI.getFileTree(state.projectPath)
@@ -151,7 +153,7 @@ export default function Sidebar() {
     async function openSearchResult(file: string, line: number) {
         const result = await window.electronAPI.readFile(file)
         if (result.success && result.content !== undefined) {
-            const name = file.split('\\').pop() || file
+            const name = file.split(/[\\/]/).pop() || file
             const ext = name.split('.').pop()?.toLowerCase() || ''
             const langMap: Record<string, string> = {
                 ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
@@ -302,7 +304,7 @@ export default function Sidebar() {
             {activeTab === 'explorer' ? (
                 <>
                     <div className="sidebar-header">
-                        <h3>{state.projectPath ? state.projectPath.split('\\').pop() : 'Explorer'}</h3>
+                        <h3>{state.projectPath ? state.projectPath.split(/[\\/]/).pop() : 'Explorer'}</h3>
                         <div style={{ display: 'flex', gap: '4px' }}>
                             {state.projectPath && (
                                 <>
@@ -382,7 +384,7 @@ export default function Sidebar() {
                         )}
                         {!isSearching && searchResults.length === 0 && searchQuery && (
                             <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
-                                Searching...
+                                No results found
                             </div>
                         )}
                         {searchResults.map((r, i) => (
@@ -394,7 +396,7 @@ export default function Sidebar() {
                                 <FileText size={12} style={{ flexShrink: 0 }} />
                                 <div style={{ minWidth: 0, overflow: 'hidden' }}>
                                     <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
-                                        {r.file.split('\\').pop()}
+                                        {r.file.split(/[\\/]/).pop()}
                                         <span style={{ color: 'var(--text-tertiary)', marginLeft: '4px' }}>:{r.line}</span>
                                     </div>
                                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -437,7 +439,7 @@ export default function Sidebar() {
 
                     <button className="file-context-menu-item" onClick={() => {
                         setRenamingPath(contextMenuPos.path)
-                        setRenameValue(contextMenuPos.path.split('\\').pop() || '')
+                        setRenameValue(contextMenuPos.path.split(/[\\/]/).pop() || '')
                         setContextMenuPos(null)
                     }}>
                         <Pencil size={12} /> Rename
