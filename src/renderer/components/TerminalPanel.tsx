@@ -1,0 +1,466 @@
+import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useApp } from '../store/appStore'
+import { Plus, X, Maximize2, Minimize2, ChevronDown, Bot, ChevronUp } from 'lucide-react'
+import { Terminal } from 'xterm'
+import { FitAddon } from 'xterm-addon-fit'
+// @ts-ignore
+import 'xterm/css/xterm.css'
+
+interface TerminalSession {
+    id: string
+    title: string
+    instance: Terminal | null
+    fitAddon: FitAddon | null
+    containerRef: React.RefObject<HTMLDivElement>
+}
+
+interface TerminalPanelProps {
+    isMaximized: boolean
+    onToggleMaximize: () => void
+}
+
+export default function TerminalPanel({ isMaximized, onToggleMaximize }: TerminalPanelProps) {
+    const { state, dispatch } = useApp()
+    const [sessions, setSessions] = useState<TerminalSession[]>([])
+    const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+    const [splitMode, setSplitMode] = useState(false)
+    const [shell, setShell] = useState('')
+    const shellRef = useRef('')
+    const [availableShells, setAvailableShells] = useState<string[]>([])
+    const [showShellDropdown, setShowShellDropdown] = useState(false)
+    const shellSelectorRef = useRef<HTMLDivElement>(null)
+    const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 })
+
+    // Keep shellRef in sync with shell state
+    useEffect(() => {
+        shellRef.current = shell
+    }, [shell])
+
+    // Load available shells on mount
+    useEffect(() => {
+        window.electronAPI.getShells().then(shells => {
+            setAvailableShells(shells)
+            if (shells.length > 0) {
+                setShell(shells[0])
+                shellRef.current = shells[0]
+            }
+        })
+    }, [])
+
+    // Initialize first session if none exists
+    useEffect(() => {
+        if (sessions.length === 0 && shell) {
+            createNewSession()
+        }
+    }, [shell])
+
+    const inputLengthsRef = useRef<Record<string, number>>({})
+
+    // Incoming data handler
+    useEffect(() => {
+        const unsubData = window.electronAPI.onTerminalData((data) => {
+            const session = sessions.find(s => s.id === data.id)
+            if (session && session.instance) {
+                // If we see a newline or carriage return from the shell, 
+                // it likely means a new prompt is starting, so reset tracking.
+                if (data.data.includes('\n') || data.data.includes('\r')) {
+                    inputLengthsRef.current[data.id] = 0
+                }
+                session.instance.write(data.data)
+            }
+        })
+
+        const unsubExit = window.electronAPI.onTerminalExit((data) => {
+            const session = sessions.find(s => s.id === data.id)
+            if (session && session.instance) {
+                session.instance.writeln(`\r\n\x1b[33mProcess exited with code ${data.code}\x1b[0m`)
+            }
+        })
+
+        return () => {
+            unsubData()
+            unsubExit()
+        }
+    }, [sessions])
+
+    const terminalAreaRef = useRef<HTMLDivElement>(null)
+
+    // Handle Resize
+    useEffect(() => {
+        let resizeTimeout: NodeJS.Timeout | null = null
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            // Debounce resize events
+            if (resizeTimeout) clearTimeout(resizeTimeout)
+            resizeTimeout = setTimeout(() => {
+                requestAnimationFrame(() => {
+                    sessions.forEach(s => {
+                        if (s.fitAddon && s.instance && s.containerRef.current) {
+                            // Only resize if the container is visible
+                            const rect = s.containerRef.current.getBoundingClientRect()
+                            if (rect.width > 0 && rect.height > 0) {
+                                try {
+                                    s.fitAddon.fit()
+                                    // Tell the PTY backend about the new size
+                                    const cols = s.instance.cols
+                                    const rows = s.instance.rows
+                                    if (cols > 0 && rows > 0) {
+                                        window.electronAPI.resizeTerminal(s.id, cols, rows)
+                                    }
+                                } catch (e) { /* ignore resize errors */ }
+                            }
+                        }
+                    })
+                })
+            }, 100)
+        })
+
+        if (terminalAreaRef.current) {
+            resizeObserver.observe(terminalAreaRef.current)
+        }
+
+        return () => {
+            resizeObserver.disconnect()
+            if (resizeTimeout) clearTimeout(resizeTimeout)
+        }
+    }, [sessions])
+
+    // Calculate dropdown position when opening
+    useEffect(() => {
+        if (showShellDropdown && shellSelectorRef.current) {
+            const rect = shellSelectorRef.current.getBoundingClientRect()
+            const dropdownHeight = Math.min(availableShells.length * 32 + 8, 200)
+            setDropdownPosition({
+                top: rect.top - dropdownHeight - 4,
+                left: rect.left
+            })
+        }
+    }, [showShellDropdown, availableShells.length])
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        if (!showShellDropdown) return
+
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            // Check if click is inside the shell selector OR the portal dropdown
+            const isInsideSelector = shellSelectorRef.current?.contains(target)
+            const isInsidePortal = target.closest('.shell-dropdown-portal')
+
+            if (!isInsideSelector && !isInsidePortal) {
+                setShowShellDropdown(false)
+            }
+        }
+
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [showShellDropdown])
+
+    function createNewSession() {
+        const id = `term-${Date.now()}`
+        const newSession: TerminalSession = {
+            id,
+            title: `Terminal ${sessions.length + 1}`,
+            instance: null, // Initialized in effect
+            fitAddon: null,
+            containerRef: React.createRef()
+        }
+
+        setSessions(prev => [...prev, newSession])
+        setActiveSessionId(id)
+
+        // Defer instantiation until DOM is ready
+        setTimeout(() => initXterm(newSession), 50)
+    }
+
+    async function initXterm(session: TerminalSession) {
+        if (!session.containerRef.current) return
+
+        // Clear any existing content
+        session.containerRef.current.innerHTML = ''
+
+        const term = new Terminal({
+            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+            fontSize: 13,
+            lineHeight: 1.2,
+            cursorBlink: true,
+            cursorStyle: 'bar',
+            allowTransparency: true,
+            convertEol: true,
+            scrollback: 10000,
+            smoothScrollDuration: 0,
+            fastScrollModifier: 'alt',
+            fastScrollSensitivity: 5,
+            theme: {
+                background: '#1a1b2e', /* Consistent dark background */
+                foreground: '#eaeaf2',
+                cursor: '#7c6cf0',
+                selectionBackground: 'rgba(124, 108, 240, 0.3)',
+                black: '#1a1b2e',
+                red: '#ff6b6b',
+                green: '#51cf66',
+                yellow: '#fcc419',
+                blue: '#339af0',
+                magenta: '#a8a0ff',
+                cyan: '#22b8cf',
+                white: '#eaeaf2',
+                brightBlack: '#7878a0',
+                brightRed: '#ff8787',
+                brightGreen: '#69db7c',
+                brightYellow: '#ffd43b',
+                brightBlue: '#4dabf7',
+                brightMagenta: '#b197fc',
+                brightCyan: '#3bc9db',
+                brightWhite: '#ffffff',
+            }
+        })
+
+        const fitAddon = new FitAddon()
+        term.loadAddon(fitAddon)
+
+        // Create a container for xterm
+        const xtermContainer = document.createElement('div')
+        xtermContainer.style.width = '100%'
+        xtermContainer.style.height = '100%'
+        xtermContainer.style.position = 'relative'
+        xtermContainer.style.overflow = 'hidden'
+        session.containerRef.current.appendChild(xtermContainer)
+
+        term.open(xtermContainer)
+
+        // Force font antialiasing
+        if (term.element) {
+            const style = term.element.style as any
+            style.WebkitFontSmoothing = 'antialiased'
+            style.MozOsxFontSmoothing = 'grayscale'
+        }
+
+        // Wait for DOM to update then fit
+        requestAnimationFrame(() => {
+            try {
+                fitAddon.fit()
+                // Resize the terminal PTY to match
+                if (term.cols && term.rows) {
+                    window.electronAPI.resizeTerminal(session.id, term.cols, term.rows)
+                }
+            } catch (e) { /* ignore fit errors */ }
+        })
+
+        term.onData((data) => {
+            if (data === '\r') {
+                inputLengthsRef.current[session.id] = 0
+                window.electronAPI.writeTerminal(session.id, '\r\n')
+            } else if (data === '\x7f' || data === '\x08') { // Backspace or Del
+                if ((inputLengthsRef.current[session.id] || 0) > 0) {
+                    inputLengthsRef.current[session.id]--
+                    // Send Remote Erase sequence: Backspace + Space + Backspace
+                    // This forces the shell to erase the character on screen correctly.
+                    window.electronAPI.writeTerminal(session.id, '\x08 \x08')
+                }
+            } else {
+                // Count printable characters
+                for (let i = 0; i < data.length; i++) {
+                    const code = data.charCodeAt(i)
+                    if (code >= 32 && code !== 127) {
+                        inputLengthsRef.current[session.id] = (inputLengthsRef.current[session.id] || 0) + 1
+                    }
+                }
+                window.electronAPI.writeTerminal(session.id, data)
+            }
+        })
+
+        term.onSelectionChange(() => {
+            const selection = term.getSelection()
+            if (selection) {
+                // xterm renders to canvas, so window.getSelection() won't work.
+                // Position the popup at the top-center of the terminal container.
+                const container = session.containerRef.current
+                if (container) {
+                    const rect = container.getBoundingClientRect()
+                    setSelection({
+                        text: selection,
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + 8
+                    })
+                }
+            } else {
+                setSelection(null)
+            }
+        })
+
+        // Update session object
+        session.instance = term
+        session.fitAddon = fitAddon
+
+        // Create backend process
+        await window.electronAPI.createTerminal(session.id, shellRef.current, state.projectPath || '')
+
+        term.focus()
+    }
+
+    const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null)
+
+    function handleAddToChat() {
+        if (selection) {
+            dispatch({ type: 'APPEND_TO_CHAT', content: selection.text })
+            setSelection(null)
+            const session = sessions.find(s => s.id === activeSessionId)
+            session?.instance?.clearSelection()
+        }
+    }
+
+    function closeSession(id: string) {
+        window.electronAPI.killTerminal(id)
+        const newSessions = sessions.filter(s => s.id !== id)
+        setSessions(newSessions)
+        if (activeSessionId === id && newSessions.length > 0) {
+            setActiveSessionId(newSessions[newSessions.length - 1].id)
+        }
+    }
+
+    function getShellDisplayName(shellPath: string): string {
+        if (!shellPath) return 'Shell'
+        const name = shellPath.toLowerCase()
+        if (name.includes('powershell')) return 'PowerShell'
+        if (name.includes('cmd')) return 'CMD'
+        if (name.includes('bash') || name.includes('git')) return 'Git Bash'
+        if (name.includes('wsl')) return 'WSL'
+        if (name.includes('zsh')) return 'Zsh'
+        // Extract just the filename for other shells
+        const parts = shellPath.split(/[\\/]/)
+        return parts[parts.length - 1].replace('.exe', '')
+    }
+
+
+
+    // Dropdown portal component
+    const dropdownPortal = showShellDropdown ? createPortal(
+        <div
+            className="shell-dropdown-portal"
+            style={{
+                position: 'fixed',
+                top: `${dropdownPosition.top}px`,
+                left: `${dropdownPosition.left}px`,
+                minWidth: '160px',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-primary)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.5)',
+                zIndex: 10000,
+                padding: '4px',
+                maxHeight: '200px',
+                overflowY: 'auto',
+            }}
+        >
+            {availableShells.map(s => (
+                <div
+                    key={s}
+                    className={`shell-dropdown-item ${shell === s ? 'active' : ''}`}
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        const previousShell = shellRef.current
+                        setShell(s)
+                        shellRef.current = s
+                        setShowShellDropdown(false)
+
+                        // Auto-create new terminal with selected shell if different
+                        if (s !== previousShell) {
+                            setTimeout(() => createNewSession(), 100)
+                        }
+                    }}
+                >
+                    {getShellDisplayName(s)}
+                </div>
+            ))}
+        </div>,
+        document.body
+    ) : null
+
+    return (
+        <div className="terminal-panel-wrapper">
+            <div className="terminal-toolbar">
+                <div className="terminal-tabs">
+                    {sessions.map(s => (
+                        <div
+                            key={s.id}
+                            className={`terminal-tab ${activeSessionId === s.id ? 'active' : ''}`}
+                            onClick={() => setActiveSessionId(s.id)}
+                        >
+                            <span>{s.title.toLowerCase()}</span>
+                            <X size={10} onClick={(e) => { e.stopPropagation(); closeSession(s.id) }} />
+                        </div>
+                    ))}
+                    <button className="toolbar-btn" onClick={createNewSession} title="New Terminal">
+                        <Plus size={14} />
+                    </button>
+
+                    {/* Shell selector dropdown */}
+                    <div className="shell-selector" ref={shellSelectorRef}>
+                        <button
+                            className="shell-selector-btn"
+                            onClick={() => setShowShellDropdown(!showShellDropdown)}
+                            title="Select Shell"
+                        >
+                            <span>{getShellDisplayName(shell)}</span>
+                            {showShellDropdown ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        </button>
+                    </div>
+                </div>
+
+                <div className="terminal-actions">
+                    <button className="toolbar-btn" onClick={onToggleMaximize} title={isMaximized ? 'Restore' : 'Maximize'}>
+                        {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    </button>
+                    <button className="toolbar-btn" onClick={() => dispatch({ type: 'TOGGLE_TERMINAL' })} title="Close Panel">
+                        <X size={14} />
+                    </button>
+                </div>
+            </div>
+
+            <div ref={terminalAreaRef} className={`terminal-content-area ${splitMode ? 'split-mode' : ''}`}>
+                {sessions.map(s => (
+                    <div
+                        key={s.id}
+                        className={`terminal-instance ${splitMode ? 'split' : (activeSessionId === s.id ? 'active' : 'hidden')
+                            }`}
+                        ref={s.containerRef}
+                    />
+                ))}
+                {sessions.length === 0 && (
+                    <div className="terminal-empty-state">
+                        <button className="btn btn-primary" onClick={createNewSession}>Open Terminal</button>
+                    </div>
+                )}
+
+                {selection && (
+                    <div
+                        className="terminal-selection-popup"
+                        style={{
+                            position: 'fixed',
+                            left: `${selection.x}px`,
+                            top: `${selection.y}px`,
+                            transform: 'translate(-50%, -100%)',
+                            zIndex: 1000,
+                        }}
+                    >
+                        <button
+                            className="terminal-add-to-chat-btn"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                handleAddToChat()
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                        >
+                            <Bot size={13} />
+                            <span>Add to Chat</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Render dropdown via portal */}
+            {dropdownPortal}
+        </div>
+    )
+}
