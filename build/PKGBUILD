@@ -1,0 +1,66 @@
+# Maintainer: Your Name <your@email.com>
+pkgname=quietlycode
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Offline-First Local AI IDE powered by llama.cpp and AirLLM"
+arch=('x86_64' 'aarch64')
+url="https://quietlycode.app"
+license=('custom')
+depends=('libnotify' 'libxtst' 'nss' 'libsecret' 'gtk3' 'libxss')
+options=(!strip)
+
+# Replace https://releases.quietlycode.app with your actual releases server URL
+_base="https://releases.quietlycode.app/latest"
+
+source_x86_64=("${pkgname}-${pkgver}-x86_64.AppImage::${_base}/QuietlyCode-${pkgver}.AppImage")
+source_aarch64=("${pkgname}-${pkgver}-arm64.AppImage::${_base}/QuietlyCode-${pkgver}-arm64.AppImage")
+
+# Generate with: sha256sum QuietlyCode-*.AppImage
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+prepare() {
+    chmod +x "${pkgname}-${pkgver}-${CARCH}.AppImage" 2>/dev/null || \
+    chmod +x "${pkgname}-${pkgver}-x86_64.AppImage"   2>/dev/null || \
+    chmod +x "${pkgname}-${pkgver}-arm64.AppImage"    2>/dev/null || true
+}
+
+package() {
+    if [ "$CARCH" = "aarch64" ]; then
+        _appimage="${pkgname}-${pkgver}-arm64.AppImage"
+    else
+        _appimage="${pkgname}-${pkgver}-x86_64.AppImage"
+    fi
+
+    install -Dm755 "${srcdir}/${_appimage}" "${pkgdir}/opt/${pkgname}/QuietlyCode.AppImage"
+
+    install -dm755 "${pkgdir}/usr/bin"
+    cat > "${pkgdir}/usr/bin/${pkgname}" <<EOF
+#!/bin/sh
+exec /opt/${pkgname}/QuietlyCode.AppImage "\$@"
+EOF
+    chmod +x "${pkgdir}/usr/bin/${pkgname}"
+
+    cd "${srcdir}"
+    ./"${_appimage}" --appimage-extract usr/share/icons 2>/dev/null || true
+    ./"${_appimage}" --appimage-extract quietlycode.png  2>/dev/null || true
+
+    if [ -f "squashfs-root/quietlycode.png" ]; then
+        install -Dm644 "squashfs-root/quietlycode.png" \
+            "${pkgdir}/usr/share/icons/hicolor/512x512/apps/quietlycode.png"
+    fi
+    rm -rf squashfs-root
+
+    install -dm755 "${pkgdir}/usr/share/applications"
+    cat > "${pkgdir}/usr/share/applications/quietlycode.desktop" <<EOF
+[Desktop Entry]
+Name=QuietlyCode
+Comment=Offline-First Local AI IDE
+Exec=/opt/${pkgname}/QuietlyCode.AppImage
+Icon=quietlycode
+Type=Application
+Categories=Development;IDE;TextEditor;
+Keywords=IDE;AI;Code;Editor;LLM;
+StartupWMClass=QuietlyCode
+EOF
+}

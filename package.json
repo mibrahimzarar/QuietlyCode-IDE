@@ -7,13 +7,20 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "start": "electron ."
+    "start": "electron .",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:mac": "npm run build && electron-builder --mac dmg",
+    "release": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "adm-zip": "^0.5.16",
     "axios": "^1.13.5",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.344.0",
     "monaco-editor": "^0.45.0",
     "node-pty": "^1.1.0",
@@ -25,11 +32,13 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@types/adm-zip": "^0.5.7",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^41.0.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
     "typescript": "^5.3.3",
     "vite": "^7.3.1"

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron'
+import { initUpdater, checkForUpdatesManually } from './updater'
 import { join, dirname, basename, extname } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, renameSync, readdirSync, statSync, rmSync } from 'fs'
 import { exec, spawn, ChildProcess } from 'child_process'
@@ -744,7 +745,8 @@ function setupIPC(): void {
 
     ipcMain.handle('terminal:execute', async (_event, command: string, cwd?: string) => {
         return new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
-            exec(command, { cwd: cwd || app.getPath('home'), maxBuffer: 1024 * 1024 * 5, shell: 'powershell.exe' }, (error, stdout, stderr) => {
+            const shell = process.platform === 'win32' ? 'powershell.exe' : true
+            exec(command, { cwd: cwd || app.getPath('home'), maxBuffer: 1024 * 1024 * 5, shell }, (error, stdout, stderr) => {
                 resolve({
                     stdout: stdout || '',
                     stderr: stderr || (error?.message || ''),
@@ -939,12 +941,20 @@ function setupIPC(): void {
 }
 
 app.whenReady().then(() => {
-    // Suppress Chromium internal network logs (noise) and ignore cert errors in dev
     app.commandLine.appendSwitch('log-level', '3')
-    app.commandLine.appendSwitch('ignore-certificate-errors')
+    // Only bypass cert errors in dev — never in production
+    if (!app.isPackaged) {
+        app.commandLine.appendSwitch('ignore-certificate-errors')
+    }
 
     setupIPC()
     createWindow()
+
+    // Wire auto-updater once window is created
+    if (mainWindow) initUpdater(mainWindow)
+
+    // IPC: renderer can trigger a manual update check
+    ipcMain.handle('updater:check', () => checkForUpdatesManually())
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

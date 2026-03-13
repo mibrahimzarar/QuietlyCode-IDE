@@ -22,6 +22,8 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 const electron = require("electron");
+const electronUpdater = require("electron-updater");
+const log = require("electron-log");
 const path = require("path");
 const fs = require("fs");
 const child_process = require("child_process");
@@ -56,6 +58,62 @@ function _interopNamespaceDefault(e) {
 const path__namespace = /* @__PURE__ */ _interopNamespaceDefault(path);
 const fs__namespace = /* @__PURE__ */ _interopNamespaceDefault(fs);
 const pty__namespace = /* @__PURE__ */ _interopNamespaceDefault(pty);
+electronUpdater.autoUpdater.logger = log;
+electronUpdater.autoUpdater.logger.transports.file.level = "info";
+electronUpdater.autoUpdater.autoInstallOnAppQuit = true;
+electronUpdater.autoUpdater.autoDownload = true;
+function initUpdater(window) {
+  if (!electron.app.isPackaged) return;
+  electronUpdater.autoUpdater.on("checking-for-update", () => {
+    window.webContents.send("update:checking");
+  });
+  electronUpdater.autoUpdater.on("update-available", (info) => {
+    window.webContents.send("update:available", {
+      version: info.version,
+      releaseDate: info.releaseDate,
+      releaseName: info.releaseName
+    });
+  });
+  electronUpdater.autoUpdater.on("update-not-available", () => {
+    window.webContents.send("update:not-available");
+  });
+  electronUpdater.autoUpdater.on("download-progress", (progress) => {
+    window.webContents.send("update:download-progress", {
+      percent: Math.round(progress.percent),
+      transferred: formatBytes(progress.transferred),
+      total: formatBytes(progress.total),
+      bytesPerSecond: formatBytes(progress.bytesPerSecond) + "/s"
+    });
+  });
+  electronUpdater.autoUpdater.on("update-downloaded", (info) => {
+    window.webContents.send("update:downloaded", { version: info.version });
+    electron.dialog.showMessageBox(window, {
+      type: "info",
+      title: "Update Ready",
+      message: `QuietlyCode ${info.version} is ready to install.`,
+      detail: "The update will be applied the next time you restart the app.",
+      buttons: ["Restart Now", "Later"],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) electronUpdater.autoUpdater.quitAndInstall(false, true);
+    });
+  });
+  electronUpdater.autoUpdater.on("error", (err) => {
+    window.webContents.send("update:error", { message: err.message });
+    log.error("Updater error:", err);
+  });
+  setTimeout(() => electronUpdater.autoUpdater.checkForUpdates(), 5e3);
+  setInterval(() => electronUpdater.autoUpdater.checkForUpdates(), 4 * 60 * 60 * 1e3);
+}
+function checkForUpdatesManually() {
+  if (!electron.app.isPackaged) return;
+  electronUpdater.autoUpdater.checkForUpdates();
+}
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 const IGNORED_DIRS = /* @__PURE__ */ new Set([
   ".git",
   ".svn",
@@ -3082,7 +3140,8 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
   });
   electron.ipcMain.handle("terminal:execute", async (_event, command, cwd) => {
     return new Promise((resolve) => {
-      child_process.exec(command, { cwd: cwd || electron.app.getPath("home"), maxBuffer: 1024 * 1024 * 5, shell: "powershell.exe" }, (error, stdout, stderr) => {
+      const shell2 = process.platform === "win32" ? "powershell.exe" : true;
+      child_process.exec(command, { cwd: cwd || electron.app.getPath("home"), maxBuffer: 1024 * 1024 * 5, shell: shell2 }, (error, stdout, stderr) => {
         resolve({
           stdout: stdout || "",
           stderr: stderr || (error?.message || ""),
@@ -3228,9 +3287,13 @@ File types: ${topExts.map(([ext, count]) => `${ext}: ${count}`).join(", ")}`);
 }
 electron.app.whenReady().then(() => {
   electron.app.commandLine.appendSwitch("log-level", "3");
-  electron.app.commandLine.appendSwitch("ignore-certificate-errors");
+  if (!electron.app.isPackaged) {
+    electron.app.commandLine.appendSwitch("ignore-certificate-errors");
+  }
   setupIPC();
   createWindow();
+  if (mainWindow) initUpdater(mainWindow);
+  electron.ipcMain.handle("updater:check", () => checkForUpdatesManually());
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) {
       createWindow();
