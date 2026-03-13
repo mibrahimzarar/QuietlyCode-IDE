@@ -1,4 +1,3 @@
-After making your changes, commit them and then tag + push:
 
 # 1. Commit your changes
 git add -A && git commit -m "your change description"

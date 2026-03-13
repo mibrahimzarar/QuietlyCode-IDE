@@ -3513,6 +3513,159 @@ code {
   margin-top: 8px;
 }
 
+/* ── Binary Download Full-Card Takeover ── */
+.ws-binary-takeover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 52px 44px 44px;
+  min-height: 380px;
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+}
+
+.ws-binary-takeover-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 30%, rgba(124, 108, 240, 0.12), transparent),
+    radial-gradient(ellipse 40% 30% at 50% 80%, rgba(124, 108, 240, 0.06), transparent);
+}
+
+/* Icon with pulse rings */
+.ws-binary-icon-wrap {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ws-binary-pulse {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent-primary);
+}
+
+.ws-binary-pulse-1 {
+  width: 80px;
+  height: 80px;
+  opacity: 0.35;
+  animation: wsBinaryPulse 2s ease-out infinite;
+}
+
+.ws-binary-pulse-2 {
+  width: 80px;
+  height: 80px;
+  opacity: 0.2;
+  animation: wsBinaryPulse 2s ease-out 0.7s infinite;
+}
+
+@keyframes wsBinaryPulse {
+  0%   { transform: scale(0.85); opacity: 0.4; }
+  60%  { transform: scale(1.45); opacity: 0; }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+
+.ws-binary-icon-core {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(124, 108, 240, 0.25), rgba(124, 108, 240, 0.1));
+  border: 1px solid rgba(124, 108, 240, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(124, 108, 240, 0.15),
+    0 0 24px rgba(124, 108, 240, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-primary);
+  position: relative;
+  z-index: 1;
+}
+
+.ws-binary-takeover-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-binary-takeover-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.ws-binary-takeover-status {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  min-height: 18px;
+}
+
+/* Big percentage counter */
+.ws-binary-pct {
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -3px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-binary-pct span {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  letter-spacing: 0;
+  margin-left: 2px;
+}
+
+/* Progress track */
+.ws-binary-track {
+  width: 100%;
+  max-width: 340px;
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+}
+
+.ws-binary-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #7c6cf0, #a89cf8);
+  box-shadow: 0 0 10px rgba(124, 108, 240, 0.5);
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.ws-binary-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.35) 50%, transparent 100%);
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.ws-binary-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: -8px 0 0;
+  letter-spacing: 0.3px;
+}
+
 /* ===== Bottom Panel (Terminal) ===== */
 .bottom-panel {
   display: flex;

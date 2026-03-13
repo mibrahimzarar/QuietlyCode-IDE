@@ -243,7 +243,49 @@ export default function SetupScreen() {
                 )}
 
                 {/* ── Paths ── */}
-                {step === 'paths' && (
+                {step === 'paths' && downloadingBinary ? (
+                    /* ── Full-card Binary Download Takeover ── */
+                    <div className="ws-binary-takeover">
+                        <div className="ws-binary-takeover-glow" />
+
+                        {/* Icon with dual pulse rings */}
+                        <div className="ws-binary-icon-wrap">
+                            <div className="ws-binary-pulse ws-binary-pulse-1" />
+                            <div className="ws-binary-pulse ws-binary-pulse-2" />
+                            <div className="ws-binary-icon-core">
+                                <Cpu size={28} />
+                            </div>
+                        </div>
+
+                        <div className="ws-binary-takeover-text">
+                            <h2 className="ws-binary-takeover-title">Setting up llama.cpp</h2>
+                            <p className="ws-binary-takeover-status">{binaryStatus || 'Connecting…'}</p>
+                        </div>
+
+                        {/* Big percentage */}
+                        <div className="ws-binary-pct">{Math.round(binaryProgress)}<span>%</span></div>
+
+                        {/* Progress bar */}
+                        <div className="ws-binary-track">
+                            <div className="ws-binary-fill" style={{ width: `${binaryProgress}%` }}>
+                                <div className="ws-binary-shimmer" />
+                            </div>
+                        </div>
+
+                        <p className="ws-binary-hint">This only happens once</p>
+
+                        <button
+                            className="ws-btn ws-btn-ghost"
+                            style={{ marginTop: 4, color: '#ef4444', borderColor: 'rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.06)' }}
+                            onClick={() => {
+                                window.electronAPI.cancelBinaryDownload?.()
+                                setDownloadingBinary(false)
+                            }}
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                ) : step === 'paths' && (
                     <div className="ws-body">
                         <StepDots active={1} />
                         <h2>Environment Setup</h2>
@@ -277,14 +319,9 @@ export default function SetupScreen() {
                                     <button
                                         className={`ws-btn ws-binary-btn ${serverBinaryPath ? 'success' : ''}`}
                                         onClick={serverBinaryPath ? undefined : handleDownloadBinary}
-                                        disabled={downloadingBinary || !!serverBinaryPath}
+                                        disabled={!!serverBinaryPath}
                                     >
-                                        {downloadingBinary ? (
-                                            <>
-                                                <span className="ws-spinner" />
-                                                {binaryStatus || 'Downloading…'} {Math.round(binaryProgress)}%
-                                            </>
-                                        ) : serverBinaryPath ? (
+                                        {serverBinaryPath ? (
                                             <><Check size={16} /> Binary Ready</>
                                         ) : (
                                             <><Download size={16} /> Auto‑Download (Recommended)</>
