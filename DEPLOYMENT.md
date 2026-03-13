@@ -1,4 +1,4 @@
-# QuietlyCode — Commercial Deployment Guide
+# Quietly — Commercial Deployment Guide
 
 Source code stays in a **private** GitHub repo. Installers are served from
 **your own domain** — no GitHub URLs are ever exposed to users.
@@ -17,11 +17,11 @@ GitHub Actions CI  (ubuntu / windows / macos runners)
         │  scp / rsync
         ▼
 Your release server  https://releases.quietlycode.app
-  /v1.0.0/  QuietlyCode-Setup-1.0.0.exe
-            QuietlyCode-1.0.0-universal.dmg
-            QuietlyCode-1.0.0.AppImage
-            QuietlyCode-1.0.0.deb
-            QuietlyCode-1.0.0.rpm
+  /v1.0.0/  Quietly-Setup-1.0.0.exe
+            Quietly-1.0.0-universal.dmg
+            Quietly-1.0.0.AppImage
+            Quietly-1.0.0.deb
+            Quietly-1.0.0.rpm
             latest.yml / latest-mac.yml / latest-linux.yml
   /latest → symlink to /v1.0.0/
   version.txt  →  "1.0.0"
@@ -68,9 +68,9 @@ On your server (nginx / Caddy / Apache):
 ```
 /var/www/releases.quietlycode.app/public/
   v1.0.0/
-    QuietlyCode-Setup-1.0.0.exe
-    QuietlyCode-1.0.0-universal.dmg
-    QuietlyCode-1.0.0.AppImage
+    Quietly-Setup-1.0.0.exe
+    Quietly-1.0.0-universal.dmg
+    Quietly-1.0.0.AppImage
     ...
     latest.yml
     latest-linux.yml

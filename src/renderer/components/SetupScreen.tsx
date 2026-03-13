@@ -204,9 +204,9 @@ export default function SetupScreen() {
                 {step === 'intro' && (
                     <div className="ws-intro">
                         <div className="ws-intro-logo">
-                            <img src="./assets/logo.jpg" alt="QuietlyCode" className="ws-logo-img" />
+                            <img src="./assets/logo.jpg" alt="Quietly" className="ws-logo-img" />
                         </div>
-                        <h1 className="ws-title">QuietlyCode</h1>
+                        <h1 className="ws-title">Quietly</h1>
                         <p className="ws-tagline">Private · Local · Intelligent</p>
                         <p className="ws-desc">
                             A calm, AI‑powered pair programmer running entirely on your machine.
@@ -250,7 +250,7 @@ export default function SetupScreen() {
                         <p className="ws-subtitle">
                             {backend === 'airllm'
                                 ? 'AirLLM downloads models from HuggingFace automatically. Optionally set a storage directory.'
-                                : 'Configure where QuietlyCode stores models and binaries.'}
+                                : 'Configure where Quietly stores models and binaries.'}
                         </p>
 
                         <div className="ws-field">

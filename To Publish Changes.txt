@@ -1,0 +1,10 @@
+After making your changes, commit them and then tag + push:
+
+# 1. Commit your changes
+git add -A && git commit -m "your change description"
+
+# 2. Tag with the new version and push
+git tag v1.0.1
+git push origin main --tags
+
+The v* tag push triggers the GitHub Actions workflow, which builds all platforms and auto-publishes everything to a GitHub Release.

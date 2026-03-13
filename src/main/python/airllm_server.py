@@ -1,7 +1,7 @@
 """
 AirLLM JSON-RPC Server
 ======================
-Long-running stdin/stdout subprocess for QuietlyCode IDE.
+Long-running stdin/stdout subprocess for Quietly IDE.
 
 Protocol
 --------

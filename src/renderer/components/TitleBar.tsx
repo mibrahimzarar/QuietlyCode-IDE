@@ -26,8 +26,8 @@ export default function TitleBar() {
     return (
         <div className="titlebar">
             <div className="titlebar-logo">
-                <img src="./assets/logo.jpg" alt="QuietlyCode" className="titlebar-logo-img" />
-                <span>QuietlyCode</span>
+                <img src="./assets/logo.jpg" alt="Quietly" className="titlebar-logo-img" />
+                <span>Quietly</span>
 
                 {state.screen === 'ide' && state.viewMode === 'ide' && (
                     <div className="titlebar-menu" style={{ marginLeft: '12px' }}>

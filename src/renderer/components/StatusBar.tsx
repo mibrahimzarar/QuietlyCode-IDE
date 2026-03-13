@@ -83,7 +83,7 @@ export default function StatusBar() {
                     </>
                 )}
                 <div className="status-item">
-                    <span>QuietlyCode</span>
+                    <span>Quietly</span>
                 </div>
             </div>
         </div>

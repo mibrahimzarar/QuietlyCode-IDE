@@ -12,10 +12,10 @@ options=(!strip)
 # Replace https://releases.quietlycode.app with your actual releases server URL
 _base="https://releases.quietlycode.app/latest"
 
-source_x86_64=("${pkgname}-${pkgver}-x86_64.AppImage::${_base}/QuietlyCode-${pkgver}.AppImage")
-source_aarch64=("${pkgname}-${pkgver}-arm64.AppImage::${_base}/QuietlyCode-${pkgver}-arm64.AppImage")
+source_x86_64=("${pkgname}-${pkgver}-x86_64.AppImage::${_base}/Quietly-${pkgver}.AppImage")
+source_aarch64=("${pkgname}-${pkgver}-arm64.AppImage::${_base}/Quietly-${pkgver}-arm64.AppImage")
 
-# Generate with: sha256sum QuietlyCode-*.AppImage
+# Generate with: sha256sum Quietly-*.AppImage
 sha256sums_x86_64=('SKIP')
 sha256sums_aarch64=('SKIP')
 
@@ -32,12 +32,12 @@ package() {
         _appimage="${pkgname}-${pkgver}-x86_64.AppImage"
     fi
 
-    install -Dm755 "${srcdir}/${_appimage}" "${pkgdir}/opt/${pkgname}/QuietlyCode.AppImage"
+    install -Dm755 "${srcdir}/${_appimage}" "${pkgdir}/opt/${pkgname}/Quietly.AppImage"
 
     install -dm755 "${pkgdir}/usr/bin"
     cat > "${pkgdir}/usr/bin/${pkgname}" <<EOF
 #!/bin/sh
-exec /opt/${pkgname}/QuietlyCode.AppImage "\$@"
+exec /opt/${pkgname}/Quietly.AppImage "\$@"
 EOF
     chmod +x "${pkgdir}/usr/bin/${pkgname}"
 
@@ -54,13 +54,13 @@ EOF
     install -dm755 "${pkgdir}/usr/share/applications"
     cat > "${pkgdir}/usr/share/applications/quietlycode.desktop" <<EOF
 [Desktop Entry]
-Name=QuietlyCode
+Name=Quietly
 Comment=Offline-First Local AI IDE
-Exec=/opt/${pkgname}/QuietlyCode.AppImage
+Exec=/opt/${pkgname}/Quietly.AppImage
 Icon=quietlycode
 Type=Application
 Categories=Development;IDE;TextEditor;
 Keywords=IDE;AI;Code;Editor;LLM;
-StartupWMClass=QuietlyCode
+StartupWMClass=Quietly
 EOF
 }

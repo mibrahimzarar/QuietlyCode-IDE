@@ -1,4 +1,4 @@
-# QuietlyCode IDE
+# Quietly IDE
 
 A calm, local, private AI pair-programmer. No cloud. No telemetry. No distractions.
 

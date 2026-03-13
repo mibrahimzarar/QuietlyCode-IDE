@@ -1,5 +1,5 @@
 /**
- * QuietlyCode OS-aware download redirector
+ * Quietly OS-aware download redirector
  *
  * Serves GET /download → detects OS from User-Agent → 302-redirects to the
  * correct installer hosted on your own releases server. No GitHub URLs exposed.
@@ -28,18 +28,18 @@ function assets(v) {
   const dir = `${RELEASES_BASE}/${v}`
   return {
     win: {
-      x64:   `${dir}/QuietlyCode-Setup-${v}.exe`,
-      arm64: `${dir}/QuietlyCode-Setup-${v}-arm64.exe`,
+      x64:   `${dir}/Quietly-Setup-${v}.exe`,
+      arm64: `${dir}/Quietly-Setup-${v}-arm64.exe`,
     },
     mac: {
-      universal: `${dir}/QuietlyCode-${v}-universal.dmg`,
+      universal: `${dir}/Quietly-${v}-universal.dmg`,
     },
     linux: {
-      appimage_x64:   `${dir}/QuietlyCode-${v}.AppImage`,
-      appimage_arm64: `${dir}/QuietlyCode-${v}-arm64.AppImage`,
-      deb_x64:        `${dir}/QuietlyCode-${v}.deb`,
-      deb_arm64:      `${dir}/QuietlyCode-${v}-arm64.deb`,
-      rpm_x64:        `${dir}/QuietlyCode-${v}.rpm`,
+      appimage_x64:   `${dir}/Quietly-${v}.AppImage`,
+      appimage_arm64: `${dir}/Quietly-${v}-arm64.AppImage`,
+      deb_x64:        `${dir}/Quietly-${v}.deb`,
+      deb_arm64:      `${dir}/Quietly-${v}-arm64.deb`,
+      rpm_x64:        `${dir}/Quietly-${v}.rpm`,
     },
   }
 }
@@ -102,7 +102,7 @@ if (require.main === module) {
       res.end('Not found')
     }
   }).listen(PORT, () => {
-    console.log(`QuietlyCode download redirector → :${PORT}`)
+    console.log(`Quietly download redirector → :${PORT}`)
     console.log(`  GET /download               auto-detect OS`)
     console.log(`  GET /download?format=deb    force .deb`)
     console.log(`  GET /download?format=rpm    force .rpm`)

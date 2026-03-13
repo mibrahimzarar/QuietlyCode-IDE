@@ -111,7 +111,7 @@ export class BinaryDownloader {
 
         try {
             const response = await axios.get(BinaryDownloader.RELEASE_API_URL, {
-                headers: { 'User-Agent': 'QuietlyCode-IDE' },
+                headers: { 'User-Agent': 'Quietly-IDE' },
                 timeout: 15000,
             })
 

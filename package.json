@@ -1,7 +1,7 @@
 {
   "name": "quietlycode",
   "version": "1.0.0",
-  "description": "Offline-First Local AI IDE powered by QuietlyCode",
+  "description": "Offline-First Local AI IDE powered by Quietly",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

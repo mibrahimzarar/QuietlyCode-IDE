@@ -47,7 +47,7 @@ export function initUpdater(window: BrowserWindow): void {
         dialog.showMessageBox(window, {
             type: 'info',
             title: 'Update Ready',
-            message: `QuietlyCode ${info.version} is ready to install.`,
+            message: `Quietly ${info.version} is ready to install.`,
             detail: 'The update will be applied the next time you restart the app.',
             buttons: ['Restart Now', 'Later'],
             defaultId: 0

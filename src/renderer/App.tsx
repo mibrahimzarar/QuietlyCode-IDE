@@ -350,14 +350,14 @@ export default function App() {
             {(state.screen === 'loading' || isInitializing) && (
                 <div className="loading-screen">
                     <div className="loading-logo">
-                        <img src="./assets/logo.jpg" alt="QuietlyCode" />
+                        <img src="./assets/logo.jpg" alt="Quietly" />
                     </div>
                     <div className="loading-dots">
                         <div className="loading-dot" />
                         <div className="loading-dot" />
                         <div className="loading-dot" />
                     </div>
-                    <div className="loading-text">Starting QuietlyCode...</div>
+                    <div className="loading-text">Starting Quietly...</div>
                 </div>
             )}
 

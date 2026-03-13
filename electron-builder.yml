@@ -1,6 +1,6 @@
 appId: com.quietlycode.ide
-productName: QuietlyCode
-copyright: Copyright © 2026 QuietlyCode
+productName: Quietly
+copyright: Copyright © 2026 Quietly
 
 directories:
   buildResources: build
@@ -29,7 +29,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: QuietlyCode
+  shortcutName: Quietly
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
@@ -49,7 +49,7 @@ mac:
       arch: [universal]   # single DMG works on both Intel & Apple Silicon
 
 dmg:
-  title: "QuietlyCode ${version}"
+  title: "Quietly ${version}"
   icon: build/icon.icns
   iconSize: 80
   contents:
@@ -68,13 +68,13 @@ linux:
   icon: build/icon.png      # 512×512 PNG
   category: Development
   description: Offline-First Local AI IDE powered by llama.cpp and AirLLM
-  maintainer: QuietlyCode <support@quietlycode.app>
+  maintainer: Quietly <support@quietlycode.app>
   desktop:
-    Name: QuietlyCode
+    Name: Quietly
     Comment: Offline-First Local AI IDE
     Categories: Development;IDE;TextEditor;
     Keywords: IDE;AI;Code;Editor;LLM;
-    StartupWMClass: QuietlyCode
+    StartupWMClass: Quietly
   target:
     - target: AppImage
       arch: [x64, arm64]
@@ -94,9 +94,10 @@ deb:
 rpm:
   packageCategory: Development/Tools
 
-# ─── Auto-update (self-hosted generic server) ────────────────────────────────
-# Installers and latest.yml are uploaded to your own domain.
-# Replace https://releases.quietlycode.app with your actual releases URL.
+# ─── Auto-update & publishing (GitHub Releases) ──────────────────────────────
+# electron-builder auto-publishes installers to GitHub Releases on tagged builds.
+# electron-updater checks GitHub Releases for latest.yml / latest-linux.yml / latest-mac.yml.
 publish:
-  provider: generic
-  url: https://releases.quietlycode.app
+  provider: github
+  owner: mibrahimzarar
+  repo: Quietly

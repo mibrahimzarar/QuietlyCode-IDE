@@ -599,7 +599,7 @@ export default function ChatPanel() {
                         <div className="chat-empty-icon">
                             <Sparkles size={32} strokeWidth={1.2} />
                         </div>
-                        <h3>QuietlyCode AI</h3>
+                        <h3>Quietly AI</h3>
                         <p>Ask me anything about your code, or select code and use the quick actions above.</p>
                     </div>
                 )}
@@ -611,7 +611,7 @@ export default function ChatPanel() {
                         </div>
                         <div className="chat-message-body">
                             <span className={`chat-message-role ${msg.role}`}>
-                                {msg.role === 'user' ? 'You' : 'QuietlyCode AI'}
+                                {msg.role === 'user' ? 'You' : 'Quietly AI'}
                             </span>
                             <div className="chat-message-content">
                                 {renderContent(msg.id, msg.content, fileActions, applyFileAction, rejectFileAction)}
