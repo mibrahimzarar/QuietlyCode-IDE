@@ -20,9 +20,10 @@ asarUnpack:
 # ─── Windows ─────────────────────────────────────────────────────────────────
 win:
   icon: build/icon.ico
+  artifactName: "Quietly-Setup.${ext}"
   target:
     - target: nsis
-      arch: [x64, arm64]
+      arch: [x64]
 
 nsis:
   oneClick: false
@@ -38,6 +39,7 @@ nsis:
 # ─── macOS ────────────────────────────────────────────────────────────────────
 mac:
   icon: build/icon.icns
+  artifactName: "Quietly-${arch}.${ext}"
   category: public.app-category.developer-tools
   darkModeSupport: true
   hardenedRuntime: true
@@ -66,6 +68,7 @@ dmg:
 # ─── Linux ───────────────────────────────────────────────────────────────────
 linux:
   icon: build/icon.png      # 512×512 PNG
+  artifactName: "Quietly-${arch}.${ext}"
   category: Development
   description: Offline-First Local AI IDE powered by llama.cpp and AirLLM
   maintainer: Quietly <support@quietlycode.app>
@@ -84,6 +87,7 @@ linux:
       arch: [x64]
 
 deb:
+  artifactName: "Quietly-${arch}.${ext}"
   packageCategory: devel
   depends:
     - libnotify4
@@ -92,6 +96,7 @@ deb:
     - libsecret-1-0
 
 rpm:
+  artifactName: "Quietly-${arch}.${ext}"
   packageCategory: Development/Tools
 
 # ─── Auto-update & publishing (GitHub Releases) ──────────────────────────────
