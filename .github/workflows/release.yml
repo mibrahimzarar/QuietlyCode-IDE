@@ -3,11 +3,11 @@ name: Build & Release
 on:
   push:
     tags:
-      - "v*"          # triggers on: git tag v1.2.3 && git push --tags
-  workflow_dispatch:  # allows manual trigger from GitHub UI
+      - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write   # needed to create GitHub Releases and upload assets
+  contents: write
 
 jobs:
   # ─── Linux: AppImage + .deb + .rpm ─────────────────────────────────────────
@@ -21,11 +21,14 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install Linux build tools (for node-pty)
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Linux build tools (for node-pty)
-        run: sudo apt-get update && sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev
+      - name: Build app with electron-vite
+        run: npx electron-vite build
 
       - name: Build & publish Linux
         run: npx electron-builder --linux AppImage deb rpm --publish always
@@ -43,16 +46,20 @@ jobs:
           node-version: 20
           cache: npm
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Build app with electron-vite
+        run: npx electron-vite build
 
       - name: Build & publish Windows
         run: npx electron-builder --win nsis --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # ── Windows Code Signing (uncomment when you have a cert) ──
-          # CSC_LINK:         ${{ secrets.WIN_CSC_LINK }}
-          # CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
   # ─── macOS: Universal .dmg (Intel + Apple Silicon) ─────────────────────────
   build-mac:
@@ -65,16 +72,18 @@ jobs:
           node-version: 20
           cache: npm
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Build app with electron-vite
+        run: npx electron-vite build
 
       - name: Build & publish macOS (Universal)
         run: npx electron-builder --mac dmg --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # ── macOS Notarization (uncomment when you have Apple certs) ──
-          # APPLE_ID:                    ${{ secrets.APPLE_ID }}
-          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          # APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
-          # CSC_LINK:                    ${{ secrets.MAC_CSC_LINK }}
-          # CSC_KEY_PASSWORD:            ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
