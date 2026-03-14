@@ -293,6 +293,7 @@ export default function ChatPanel() {
     function handleSend() {
         const trimmed = input.trim()
         if (!trimmed || state.isStreaming) return
+        if (!state.projectPath && state.openFiles.length === 0) return
 
         setShowSuggestions(false)
         dispatch({
@@ -600,11 +601,15 @@ export default function ChatPanel() {
                             <Sparkles size={32} strokeWidth={1.2} />
                         </div>
                         <h3>Quietly AI</h3>
-                        <p>Ask me anything about your code, or select code and use the quick actions above.</p>
+                        {!state.projectPath && state.openFiles.length === 0 ? (
+                            <p>Open a folder or file to start chatting with AI about your code.</p>
+                        ) : (
+                            <p>Ask me anything about your code, or select code and use the quick actions above.</p>
+                        )}
                     </div>
                 )}
 
-                {state.chatMessages.map((msg) => (
+                {state.chatMessages.map((msg, idx) => (
                     <div key={msg.id} className={`chat-message ${msg.role}`}>
                         <div className="chat-message-avatar">
                             {msg.role === 'user' ? '→' : <Cpu size={13} />}
@@ -614,7 +619,15 @@ export default function ChatPanel() {
                                 {msg.role === 'user' ? 'You' : 'Quietly AI'}
                             </span>
                             <div className="chat-message-content">
-                                {renderContent(msg.id, msg.content, fileActions, applyFileAction, rejectFileAction)}
+                                {msg.content ? (
+                                    renderContent(msg.id, msg.content, fileActions, applyFileAction, rejectFileAction)
+                                ) : (
+                                    state.isStreaming && msg.role === 'assistant' && idx === state.chatMessages.length - 1 && (
+                                        <div className="typing-indicator">
+                                            <span /><span /><span />
+                                        </div>
+                                    )
+                                )}
                                 {msg.role === 'assistant' && indexingProgress && (
                                     <div className="status-indicator">
                                         Using updated context...
@@ -624,12 +637,6 @@ export default function ChatPanel() {
                         </div>
                     </div>
                 ))}
-
-                {state.isStreaming && !state.chatMessages[state.chatMessages.length - 1]?.content && (
-                    <div className="typing-indicator">
-                        <span /><span /><span />
-                    </div>
-                )}
 
                 <div ref={messagesEndRef} />
             </div>
@@ -661,12 +668,12 @@ export default function ChatPanel() {
                     <textarea
                         ref={textareaRef}
                         className="chat-input"
-                        placeholder="Ask about your code…"
+                        placeholder={!state.projectPath && state.openFiles.length === 0 ? "Open a folder or file first…" : "Ask about your code…"}
                         value={input}
                         onChange={handleTextareaInput}
                         onKeyDown={handleKeyDown}
                         rows={1}
-                        disabled={switchingModel}
+                        disabled={switchingModel || (!state.projectPath && state.openFiles.length === 0)}
                     />
                     <div className="chat-input-footer">
                         <div className="model-selector" ref={dropdownRef}>
@@ -824,7 +831,7 @@ export default function ChatPanel() {
                             <button
                                 className="chat-send-btn"
                                 onClick={handleSend}
-                                disabled={!input.trim() || switchingModel}
+                                disabled={!input.trim() || switchingModel || (!state.projectPath && state.openFiles.length === 0)}
                             >
                                 <Send size={14} />
                             </button>

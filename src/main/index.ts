@@ -17,6 +17,12 @@ import { GitService } from './git-service'
 import { FormatService } from './format-service'
 import { DebugService } from './debug-service'
 
+// Fix blank screen on Linux (GPU compositing issues with AppImage/Wayland)
+if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('disable-gpu-compositing')
+    app.commandLine.appendSwitch('disable-software-rasterizer')
+}
+
 let mainWindow: BrowserWindow | null = null
 let fileService: FileService
 let aiService: AIService
@@ -101,7 +107,7 @@ function createWindow(): void {
         frame: false,
         titleBarStyle: 'hidden',
         backgroundColor: '#0a0a0f',
-        icon: nativeImage.createFromPath(join(__dirname, '../../assets/images/1.png')),
+        icon: nativeImage.createFromPath(join(__dirname, '../../build/icon.png')),
         webPreferences: {
             preload: join(__dirname, '../preload/index.js'),
             nodeIntegration: false,

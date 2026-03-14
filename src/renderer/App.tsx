@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import { useApp } from './store/appStore'
+import logoImg from './assets/logo.jpg'
 import SetupScreen from './components/SetupScreen'
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
@@ -350,7 +351,7 @@ export default function App() {
             {(state.screen === 'loading' || isInitializing) && (
                 <div className="loading-screen">
                     <div className="loading-logo">
-                        <img src="./assets/logo.jpg" alt="Quietly" />
+                        <img src={logoImg} alt="Quietly" />
                     </div>
                     <div className="loading-dots">
                         <div className="loading-dot" />

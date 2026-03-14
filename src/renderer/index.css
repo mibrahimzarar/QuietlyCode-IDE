@@ -5685,6 +5685,11 @@ code {
   color: #fff;
 }
 
+[data-theme="light"] .standalone-brand-icon {
+  color: rgba(124, 108, 240, 0.9);
+  background: rgba(124, 108, 240, 0.1);
+}
+
 .standalone-chat-header-right {
   display: flex;
   align-items: center;
@@ -5797,6 +5802,12 @@ code {
 .standalone-chat-message.assistant .standalone-message-avatar {
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-hover));
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+[data-theme="light"] .standalone-chat-message.assistant .standalone-message-avatar {
+  color: rgba(124, 108, 240, 0.9);
+  background: rgba(124, 108, 240, 0.15);
+  box-shadow: none;
 }
 
 .standalone-message-body {

@@ -90,7 +90,7 @@ function initUpdater(window) {
     electron.dialog.showMessageBox(window, {
       type: "info",
       title: "Update Ready",
-      message: `QuietlyCode ${info.version} is ready to install.`,
+      message: `Quietly ${info.version} is ready to install.`,
       detail: "The update will be applied the next time you restart the app.",
       buttons: ["Restart Now", "Later"],
       defaultId: 0
@@ -1304,7 +1304,7 @@ class BinaryDownloader {
     let lastError = "";
     try {
       const response = await axios.get(BinaryDownloader.RELEASE_API_URL, {
-        headers: { "User-Agent": "QuietlyCode-IDE" },
+        headers: { "User-Agent": "Quietly-IDE" },
         timeout: 15e3
       });
       const assets = response.data.assets;
@@ -2539,6 +2539,10 @@ class DebugService extends events.EventEmitter {
     return { type: session.type, isPaused: session.isPaused };
   }
 }
+if (process.platform === "linux") {
+  electron.app.commandLine.appendSwitch("disable-gpu-compositing");
+  electron.app.commandLine.appendSwitch("disable-software-rasterizer");
+}
 let mainWindow = null;
 let fileService;
 let aiService;
@@ -2599,7 +2603,7 @@ function createWindow() {
     frame: false,
     titleBarStyle: "hidden",
     backgroundColor: "#0a0a0f",
-    icon: electron.nativeImage.createFromPath(path.join(__dirname, "../../assets/images/1.png")),
+    icon: electron.nativeImage.createFromPath(path.join(__dirname, "../../build/icon.png")),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       nodeIntegration: false,

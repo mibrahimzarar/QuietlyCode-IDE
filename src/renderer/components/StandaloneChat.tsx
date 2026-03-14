@@ -572,7 +572,7 @@ export default function StandaloneChat() {
                             </div>
                         )}
 
-                        {chatMessages.map((msg) => (
+                        {chatMessages.map((msg, idx) => (
                             <div key={msg.id} className={`standalone-chat-message ${msg.role}`}>
                                 <div className="standalone-message-avatar">
                                     {msg.role === 'user' ? 'You' : <Cpu size={16} />}
@@ -582,10 +582,17 @@ export default function StandaloneChat() {
                                         {msg.role === 'user' ? 'You' : 'Quietly AI'}
                                     </span>
                                     <div className="standalone-message-content markdown-body">
-                                        {/* Render markdown logic here - reusing your chat panel logic or simplified string for now */}
-                                        <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: 'transparent', margin: 0 }}>
-                                            {msg.content}
-                                        </pre>
+                                        {msg.content ? (
+                                            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: 'transparent', margin: 0 }}>
+                                                {msg.content}
+                                            </pre>
+                                        ) : (
+                                            state.isStreaming && msg.role === 'assistant' && idx === chatMessages.length - 1 && (
+                                                <div className="standalone-typing-indicator">
+                                                    <span /><span /><span />
+                                                </div>
+                                            )
+                                        )}
 
                                         {msg.role === 'assistant' && indexingProgress && (
                                             <div className="status-indicator">
@@ -596,18 +603,6 @@ export default function StandaloneChat() {
                                 </div>
                             </div>
                         ))}
-
-                        {state.isStreaming && !chatMessages[chatMessages.length - 1]?.content && (
-                            <div className="standalone-chat-message assistant">
-                                <div className="standalone-message-avatar"><Cpu size={16} /></div>
-                                <div className="standalone-message-body">
-                                    <span className="standalone-message-role assistant">Quietly AI</span>
-                                    <div className="standalone-typing-indicator">
-                                        <span /><span /><span />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
                         <div ref={messagesEndRef} />
                     </div>
                 </div>

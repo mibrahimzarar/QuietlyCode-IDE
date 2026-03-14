@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useApp } from '../store/appStore'
 import { Cpu, Minus, Square, Copy, X, Sun, Moon, Settings, Terminal } from 'lucide-react'
+import logoImg from '../assets/logo.jpg'
 
 export default function TitleBar() {
     const { state, dispatch } = useApp()
@@ -26,7 +27,7 @@ export default function TitleBar() {
     return (
         <div className="titlebar">
             <div className="titlebar-logo">
-                <img src="./assets/logo.jpg" alt="Quietly" className="titlebar-logo-img" />
+                <img src={logoImg} alt="Quietly" className="titlebar-logo-img" />
                 <span>Quietly</span>
 
                 {state.screen === 'ide' && state.viewMode === 'ide' && (
