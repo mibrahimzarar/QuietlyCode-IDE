@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  # ─── Linux: AppImage + .deb + .rpm ─────────────────────────────────────────
+  # ─── Linux ────────────────────────────────────────────────────────────────
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -21,21 +21,31 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install Linux build tools (for node-pty)
+      - name: Install Linux build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential python3 libx11-dev libxkbfile-dev libsecret-1-dev
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build app with electron-vite
+      - name: Build app
         run: npx electron-vite build
 
-      - name: Build & publish Linux
-        run: npx electron-builder --linux AppImage deb rpm --publish always
+      - name: Package Linux
+        run: npx electron-builder --linux AppImage deb rpm --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─── Windows: NSIS installer (.exe) ────────────────────────────────────────
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+
+  # ─── Windows ──────────────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
@@ -53,15 +63,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build app with electron-vite
+      - name: Build app
         run: npx electron-vite build
 
-      - name: Build & publish Windows
-        run: npx electron-builder --win nsis --publish always
+      - name: Package Windows
+        run: npx electron-builder --win nsis --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─── macOS: Universal .dmg (Intel + Apple Silicon) ─────────────────────────
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: dist/*.exe
+          if-no-files-found: error
+
+  # ─── macOS ────────────────────────────────────────────────────────────────
   build-mac:
     runs-on: macos-latest
     steps:
@@ -79,11 +96,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build app with electron-vite
+      - name: Build app
         run: npx electron-vite build
 
-      - name: Build & publish macOS (Universal)
-        run: npx electron-builder --mac dmg --publish always
+      - name: Package macOS
+        run: npx electron-builder --mac dmg --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-builds
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  # ─── Publish all assets to one GitHub Release ─────────────────────────────
+  release:
+    needs: [build-linux, build-windows, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
